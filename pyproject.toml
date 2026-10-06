@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+[project]
+name = "oauth21-asgi"
+dynamic = ["version"]
+description = "An ASGI Authorization Server integration built on Authlib"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
+dependencies = ["Authlib>=1.8.0,<2", "starlette>=1.7.0,<2", "python-multipart>=0.0.32,<1"]
+classifiers = ["Development Status :: 3 - Alpha", "Programming Language :: Python :: 3.11", "Programming Language :: Python :: 3.12", "Programming Language :: Python :: 3.13", "Programming Language :: Python :: 3.14", "Typing :: Typed", "Topic :: Security"]
+[project.optional-dependencies]
+fastapi = ["fastapi>=0.142.2,<1"]
+example = ["fastapi>=0.142.2,<1", "uvicorn>=0.41,<1", "itsdangerous>=2.2,<3"]
+dev = ["pytest>=8.4,<10", "pytest-cov>=7,<8", "httpx2>=2.13.1,<3", "ruff>=0.15,<1", "mypy>=1.19,<3", "build>=1.4,<2", "twine>=7,<8", "pip-audit>=2.10,<3", "bandit>=1.9,<2"]
+[tool.hatch.version]
+path = "src/oauth21_asgi/_version.py"
+[tool.hatch.build.targets.wheel]
+packages = ["src/oauth21_asgi"]
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "examples", "scripts", "docs", "LICENSE", "*.md", "pyproject.toml", ".github", "release-please-config.json", ".release-please-manifest.json", ".editorconfig", ".gitignore", ".gitattributes"]
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+filterwarnings = ["error", "ignore:.*deprecated.*:authlib.deprecate.AuthlibDeprecationWarning"]
+[tool.coverage.run]
+branch = true
+source = ["oauth21_asgi"]
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = [".tools", "artifacts", "dist", "build"]
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B", "S"]
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "S105", "S106"]
+"scripts/wheel_smoke.py" = ["S101", "S105"]
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src"]
+[[tool.mypy.overrides]]
+module = ["authlib.*", "joserfc.*"]
+ignore_missing_imports = true
+[[tool.mypy.overrides]]
+module = ["oauth21_asgi.engine", "oauth21_asgi.extensions", "oauth21_asgi.models", "oauth21_asgi.http"]
+disable_error_code = ["no-any-return", "no-untyped-call", "no-untyped-def", "misc"]
