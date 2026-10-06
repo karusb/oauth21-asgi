@@ -9,8 +9,17 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "BSD-3-Clause"
 license-files = ["LICENSE"]
+authors = [{name = "oauth21-asgi contributors"}]
+keywords = ["oauth", "oauth2", "asgi", "fastapi", "authlib", "pkce"]
 dependencies = ["Authlib>=1.8.0,<2", "starlette>=1.7.0,<2", "python-multipart>=0.0.32,<1"]
 classifiers = ["Development Status :: 3 - Alpha", "Programming Language :: Python :: 3.11", "Programming Language :: Python :: 3.12", "Programming Language :: Python :: 3.13", "Programming Language :: Python :: 3.14", "Typing :: Typed", "Topic :: Security"]
+[project.urls]
+Homepage = "https://github.com/karusb/oauth21-asgi"
+Documentation = "https://github.com/karusb/oauth21-asgi#readme"
+Source = "https://github.com/karusb/oauth21-asgi"
+Issues = "https://github.com/karusb/oauth21-asgi/issues"
+Changelog = "https://github.com/karusb/oauth21-asgi/blob/main/CHANGELOG.md"
+"Security Policy" = "https://github.com/karusb/oauth21-asgi/blob/main/SECURITY.md"
 [project.optional-dependencies]
 fastapi = ["fastapi>=0.142.2,<1"]
 example = ["fastapi>=0.142.2,<1", "uvicorn>=0.41,<1", "itsdangerous>=2.2,<3"]

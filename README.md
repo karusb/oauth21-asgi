@@ -4,7 +4,7 @@
 
 ![Python 3.11–3.14](https://img.shields.io/badge/python-3.11–3.14-3776AB?logo=python&logoColor=white)
 ![ASGI / FastAPI](https://img.shields.io/badge/ASGI-FastAPI-009688)
-[![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
+[![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue)](https://github.com/karusb/oauth21-asgi/blob/main/LICENSE)
 
 Add an Authorization Server for public clients with mandatory PKCE S256, Dynamic Client Registration and resource-bound opaque tokens. Your application owns login, consent and storage; Authlib handles the OAuth protocol.
 
@@ -38,7 +38,7 @@ python -m pip install -e '.[dev,example]'
 python -m uvicorn examples.fastapi_app:app --host 127.0.0.1 --port 8000
 ```
 
-Open [http://127.0.0.1:8000/login](http://127.0.0.1:8000/login) to try the demo login. See [the complete example](examples/fastapi_app.py) for identity, consent and resource-server wiring.
+Open [http://127.0.0.1:8000/login](http://127.0.0.1:8000/login) to try the demo login. See [the complete example](https://github.com/karusb/oauth21-asgi/blob/main/examples/fastapi_app.py) for identity, consent and resource-server wiring.
 
 > The demo login and `MemoryStorage` are for development only. The example explicitly enables HTTP loopback; public issuers require HTTPS.
 
@@ -70,7 +70,7 @@ oauth.mount(app)
 
 - **Identity:** async `authenticate(request)` returns a `Subject` or your login/error response. Synchronous `get_subject(subject_id)` performs a fresh authoritative lookup. A subject carries its stable ID, active state and `authorization_version`; change that version after reset, disable or account recreation.
 - **Consent:** `render(request, context, consent_token)` returns your consent page. Escape displayed metadata and include `consent_token` in a POST form to the authorization route. The validated context contains client identity, scopes, exact resource/redirect, state and subject. `decide(request, context)` returns `Decision.ALLOW` or `Decision.DENY`; GET never grants access.
-- **Storage:** implement `Storage.transaction()` and `UnitOfWork` for durable, transactional persistence. Read the [storage contract](docs/storage.md) before building an adapter. **`MemoryStorage` is development/single-process only.**
+- **Storage:** implement `Storage.transaction()` and `UnitOfWork` for durable, transactional persistence. Read the [storage contract](https://github.com/karusb/oauth21-asgi/blob/main/docs/storage.md) before building an adapter. **`MemoryStorage` is development/single-process only.**
 
 ## Public-client flow
 
@@ -135,7 +135,7 @@ MCP hosts can use this package as their Authorization Server while the official 
 
 `ExactRedirectPolicy` requires safe HTTPS and exact membership. `CallableRedirectPolicy` checks URI safety before applying your predicate. Loopback callbacks require explicit opt-in. No metadata URL is fetched.
 
-Codes/access/refresh credentials are random 256-bit secrets with SHA-256 digests at rest. Clients and resource audiences match exactly. Storage failures fail closed. Authlib's token-bearing DEBUG grant logs are filtered; infrastructure must independently redact request bodies, credentials and callback queries. See [SECURITY.md](SECURITY.md), [architecture](docs/architecture.md) and [storage](docs/storage.md).
+Codes/access/refresh credentials are random 256-bit secrets with SHA-256 digests at rest. Clients and resource audiences match exactly. Storage failures fail closed. Authlib's token-bearing DEBUG grant logs are filtered; infrastructure must independently redact request bodies, credentials and callback queries. See [SECURITY.md](https://github.com/karusb/oauth21-asgi/blob/main/SECURITY.md), [architecture](https://github.com/karusb/oauth21-asgi/blob/main/docs/architecture.md) and [storage](https://github.com/karusb/oauth21-asgi/blob/main/docs/storage.md).
 
 ## Development and releases
 
@@ -153,20 +153,19 @@ python -m twine check --strict dist/*
 python scripts/check_distribution.py dist
 ```
 
-CI runs all supported interpreters and checks the wheel installed outside the source tree. Conventional Commits drive Release Please; `_version.py` is the authoritative package version. See [CONTRIBUTING.md](CONTRIBUTING.md) and [release setup](docs/releases.md).
+CI runs all supported interpreters and checks the wheel installed outside the source tree. Conventional Commits drive Release Please; `_version.py` is the authoritative package version. See [CONTRIBUTING.md](https://github.com/karusb/oauth21-asgi/blob/main/CONTRIBUTING.md) for development and PyPI publishing setup.
 
 ## Documentation
 
 | Guide | When to read it |
 | --- | --- |
-| [Architecture](docs/architecture.md) | Understand the Authlib integration and host boundaries |
-| [Storage contract](docs/storage.md) | Implement a production storage adapter |
-| [Security](SECURITY.md) | Review security expectations and report vulnerabilities |
-| [Contributing](CONTRIBUTING.md) | Set up development and contribute changes |
-| [Releases](docs/releases.md) | Configure publishing and release automation |
+| [Architecture](https://github.com/karusb/oauth21-asgi/blob/main/docs/architecture.md) | Understand the Authlib integration and host boundaries |
+| [Storage contract](https://github.com/karusb/oauth21-asgi/blob/main/docs/storage.md) | Implement a production storage adapter |
+| [Security](https://github.com/karusb/oauth21-asgi/blob/main/SECURITY.md) | Review security expectations and report vulnerabilities |
+| [Contributing](https://github.com/karusb/oauth21-asgi/blob/main/CONTRIBUTING.md) | Develop, contribute and publish releases |
 
 ## License
 
-[BSD-3-Clause](LICENSE). Authlib and Starlette are BSD-3-Clause; python-multipart is Apache-2.0. These remain separately licensed dependencies, installed from their own distributions. No upstream source is vendored or relicensed here. Redistributing dependencies requires retaining their applicable license and copyright notices.
+[BSD-3-Clause](https://github.com/karusb/oauth21-asgi/blob/main/LICENSE). Authlib and Starlette are BSD-3-Clause; python-multipart is Apache-2.0. These remain separately licensed dependencies, installed from their own distributions. No upstream source is vendored or relicensed here. Redistributing dependencies requires retaining their applicable license and copyright notices.
 
 Upstream terms: [Authlib](https://github.com/authlib/authlib/blob/v1.8.0/LICENSE), [Starlette](https://github.com/Kludex/starlette/blob/1.7.0/LICENSE.md), [python-multipart](https://github.com/Kludex/python-multipart/blob/0.0.32/LICENSE.txt).

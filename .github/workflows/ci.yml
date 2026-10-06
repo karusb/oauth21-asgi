@@ -39,6 +39,7 @@ jobs:
       - if: matrix.python == '3.14'
         run: |
           python -m build
+          python scripts/publication_gate.py
           python -m twine check --strict dist/*
           python scripts/check_distribution.py dist
           python -m venv "$RUNNER_TEMP/wheel-smoke"

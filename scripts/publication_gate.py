@@ -6,7 +6,7 @@ import tomllib
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-project = tomllib.loads((root / "pyproject.toml").read_text())["project"]
+project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]
 license_file = root / "LICENSE"
 if (
     not license_file.is_file()

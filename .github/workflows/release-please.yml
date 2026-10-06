@@ -3,6 +3,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing release tag to publish to PyPI (for example v0.1.1); leave empty for normal release automation'
+        required: false
+        type: string
 permissions:
   contents: read
 concurrency:
@@ -13,7 +18,7 @@ jobs:
     uses: ./.github/workflows/ci.yml
   release:
     needs: checks
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && inputs.release_tag == ''
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -64,8 +69,13 @@ jobs:
           RELEASE_TAG: ${{ steps.release.outputs.tag_name }}
         run: gh release upload "$RELEASE_TAG" dist/*.whl dist/*.tar.gz --clobber
   publish:
-    needs: release
-    if: needs.release.outputs.created == 'true' && vars.PYPI_PUBLISH == 'true'
+    needs: [checks, release]
+    if: >-
+      always() && !cancelled() && github.ref == 'refs/heads/main' &&
+      needs.checks.result == 'success' && vars.PYPI_PUBLISH == 'true' &&
+      (needs.release.outputs.created == 'true' ||
+      (github.event_name == 'workflow_dispatch' && inputs.release_tag != '' &&
+      needs.release.result == 'skipped'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:
@@ -74,10 +84,12 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    env:
+      RELEASE_TAG: ${{ needs.release.outputs.tag || inputs.release_tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.release.outputs.tag }}
+          ref: ${{ env.RELEASE_TAG }}
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -88,7 +100,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ needs.release.outputs.tag }}
         run: |
           gh release download "$RELEASE_TAG" --dir dist --pattern '*.whl' --pattern '*.tar.gz'
           python scripts/check_distribution.py dist
