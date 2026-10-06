@@ -1,40 +1,52 @@
 # oauth21-asgi
 
-An **ASGI/FastAPI Authorization Server integration built on Authlib** for public clients, mandatory PKCE S256, Dynamic Client Registration and resource-bound opaque tokens.
+**OAuth for your ASGI app, powered by Authlib.**
 
-Python 3.11–3.14. The host application provides authentication, consent and persistent storage. OAuth protocol handling stays in Authlib.
+![Python 3.11–3.14](https://img.shields.io/badge/python-3.11–3.14-3776AB?logo=python&logoColor=white)
+![ASGI / FastAPI](https://img.shields.io/badge/ASGI-FastAPI-009688)
+[![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
+
+Add an Authorization Server for public clients with mandatory PKCE S256, Dynamic Client Registration and resource-bound opaque tokens. Your application owns login, consent and storage; Authlib handles the OAuth protocol.
+
+[Quick start](#quick-start) · [App integration](#mount-in-your-application) · [Client flow](#public-client-flow) · [Resource servers](#resource-server-integration) · [Documentation](#documentation)
 
 ## Features
 
-- Authorization Code with public-client authentication (`none`) and mandatory PKCE S256.
-- Dynamic Client Registration (RFC 7591), authorization server discovery (RFC 8414), callback issuer identification (RFC 9207) and token revocation (RFC 7009).
-- Exact resource binding (RFC 8707), configurable scopes and callback policies.
-- Single-use authorization codes, rotating refresh tokens, replay-family revocation and absolute grant lifetimes.
-- Opaque credentials digested at rest, account-version invalidation and transactional storage contracts.
-- Explicit consent protected by a browser-bound, one-use ticket.
-- Bounded requests, duplicate-parameter rejection and non-cacheable OAuth responses.
+| Capability | What you get |
+| --- | --- |
+| Authorization | Authorization Code, public-client authentication (`none`) and mandatory PKCE S256 |
+| Discovery & registration | Dynamic Client Registration (RFC 7591), server discovery (RFC 8414) and callback issuer identification (RFC 9207) |
+| Resource binding | Exact audiences (RFC 8707), configurable scopes and redirect policies |
+| Token lifecycle | Single-use codes, rotating refresh tokens, replay-family revocation, absolute grant lifetimes and revocation (RFC 7009) |
+| Host integration | Transactional storage contracts, account-version invalidation and browser-bound, one-use consent tickets |
+| Request protection | Bounded requests, duplicate-parameter rejection, non-cacheable OAuth responses and credential digests at rest |
 
-This is a focused public-client profile. It does not include OIDC, JWT access tokens, confidential clients, passwords, social login, CIMD or token introspection. It is not an OAuth certification.
+**Scope:** a focused public-client profile, without OIDC, JWT access tokens, confidential clients, password grants, social login, CIMD or token introspection. This project is not an OAuth certification.
 
-## Installation
+## Quick start
 
-Install a published release with FastAPI support:
+**Requires Python 3.11–3.14.** Install with FastAPI support:
 
 ```sh
 python -m pip install 'oauth21-asgi[fastapi]'
 ```
 
-For development, install from the checkout:
+To try the included demo, run these commands from a checkout:
 
 ```sh
 python -m pip install -e '.[dev,example]'
+python -m uvicorn examples.fastapi_app:app --host 127.0.0.1 --port 8000
 ```
 
-FastAPI is optional; Starlette hosts can install the base package. Authlib, Starlette and python-multipart are the required runtime dependencies. No database driver or MCP SDK is required.
+Open [http://127.0.0.1:8000/login](http://127.0.0.1:8000/login) to try the demo login. See [the complete example](examples/fastapi_app.py) for identity, consent and resource-server wiring.
+
+> The demo login and `MemoryStorage` are for development only. The example explicitly enables HTTP loopback; public issuers require HTTPS.
+
+For Starlette, install `oauth21-asgi` without the FastAPI extra. Runtime dependencies are Authlib, Starlette and python-multipart; no database driver or MCP SDK is required.
 
 ## Mount in your application
 
-Supply your application's storage, identity and consent adapters:
+Supply your application's storage, identity and consent adapters. In this snippet, `storage`, `identity` and `consent` are your implementations of the contracts below:
 
 ```python
 from fastapi import FastAPI
@@ -54,23 +66,21 @@ oauth = AuthorizationServer(
 oauth.mount(app)
 ```
 
-`Identity.authenticate(request)` is async and returns an authenticated `Subject` or a host login/error response. `Identity.get_subject(subject_id)` is synchronous and performs a fresh authoritative lookup. A subject includes its stable ID, active state and `authorization_version`; change the version after reset, disable or account recreation.
+### The three host adapters
 
-`Consent.render(request, context, consent_token)` returns your consent page. The validated context includes client identity, scopes, exact resource/redirect, state and subject. Escape displayed metadata. Include `consent_token` in a POST form to the authorization route. `Consent.decide(request, context)` returns `Decision.ALLOW` or `Decision.DENY`. GET never grants access.
-
-Production storage implements `Storage.transaction()` and the `UnitOfWork` contract. **MemoryStorage is development/single-process only.** Read the [storage contract](docs/storage.md) before implementing a durable adapter.
-
-A complete development host is provided in [examples/fastapi_app.py](examples/fastapi_app.py):
-
-```sh
-python -m uvicorn examples.fastapi_app:app --host 127.0.0.1 --port 8000
-```
-
-The example login is demonstration-only. HTTP loopback is explicitly enabled there; public issuers require HTTPS.
+- **Identity:** async `authenticate(request)` returns a `Subject` or your login/error response. Synchronous `get_subject(subject_id)` performs a fresh authoritative lookup. A subject carries its stable ID, active state and `authorization_version`; change that version after reset, disable or account recreation.
+- **Consent:** `render(request, context, consent_token)` returns your consent page. Escape displayed metadata and include `consent_token` in a POST form to the authorization route. The validated context contains client identity, scopes, exact resource/redirect, state and subject. `decide(request, context)` returns `Decision.ALLOW` or `Decision.DENY`; GET never grants access.
+- **Storage:** implement `Storage.transaction()` and `UnitOfWork` for durable, transactional persistence. Read the [storage contract](docs/storage.md) before building an adapter. **`MemoryStorage` is development/single-process only.**
 
 ## Public-client flow
 
-Discover `/.well-known/oauth-authorization-server`, then POST JSON to `/oauth/register`:
+Default routes follow this flow:
+
+**Discover → Register → Authorize + consent → Exchange → Refresh or revoke**
+
+### 1. Discover and register
+
+Read `/.well-known/oauth-authorization-server`, then POST JSON to `/oauth/register`:
 
 ```json
 {
@@ -85,15 +95,25 @@ Discover `/.well-known/oauth-authorization-server`, then POST JSON to `/oauth/re
 
 The registration response contains a random client ID and no client secret. This profile defaults omitted auth method to `none`, grants to code/refresh and scope to configured scopes. Registration is public; use `registration_hook` and host middleware for rate control.
 
-Authorize at `/oauth/authorize` with `response_type=code`, client ID, exact registered redirect, scope, fresh state, **one** allowlisted resource, a valid S256 challenge and explicit `code_challenge_method=S256`. After login and consent, the client checks callback state and exact `iss` against discovery.
+### 2. Authorize
+
+Send the user to `/oauth/authorize` with `response_type=code`, client ID, exact registered redirect, scope, fresh state, **one** allowlisted resource, a valid S256 challenge and explicit `code_challenge_method=S256`. After login and consent, check callback state and exact `iss` against discovery.
+
+### 3. Exchange the code
 
 Exchange using POST form encoding at `/oauth/token`: `grant_type=authorization_code`, client ID, code, verifier, the same redirect and resource. Verifiers must contain 43–128 permitted characters. Authlib performs PKCE hashing/comparison. Wrong verifier/client/redirect/resource does not consume the code; success does so atomically.
 
-Refresh uses `grant_type=refresh_token`, client ID, refresh token, the same resource and optional narrowed scope. Each rotation replaces both credentials. A correctly bound predecessor replay revokes its whole family, including the successor. Serialize refresh requests; concurrent replay invalidates the one issued successor. Grant lifetime never slides indefinitely.
+### 4. Refresh or revoke
+
+Refresh at `/oauth/token` with `grant_type=refresh_token`, client ID, refresh token, the same resource and optional narrowed scope. Each rotation replaces both credentials; grant lifetime never slides indefinitely.
+
+> **Serialize refresh requests.** A correctly bound predecessor replay revokes its entire token family, including the successor. Concurrent replay therefore invalidates the newly issued credentials.
 
 Revoke at `/oauth/revoke` with client ID, token and optional `token_type_hint`. Access or refresh revocation invalidates the family; unknown tokens return success. Credentials belong in form bodies, not URL queries or Authorization headers for this public-only profile.
 
-## Resource Server integration
+## Resource server integration
+
+Validate a bearer token against the exact resource and required scopes:
 
 ```python
 principal = oauth.validate_access_token(
@@ -119,6 +139,8 @@ Codes/access/refresh credentials are random 256-bit secrets with SHA-256 digests
 
 ## Development and releases
 
+Install `.[dev,example]` from the checkout, then run:
+
 ```sh
 python -m pytest --cov --cov-report=term-missing
 python -m ruff check .
@@ -132,6 +154,16 @@ python scripts/check_distribution.py dist
 ```
 
 CI runs all supported interpreters and checks the wheel installed outside the source tree. Conventional Commits drive Release Please; `_version.py` is the authoritative package version. See [CONTRIBUTING.md](CONTRIBUTING.md) and [release setup](docs/releases.md).
+
+## Documentation
+
+| Guide | When to read it |
+| --- | --- |
+| [Architecture](docs/architecture.md) | Understand the Authlib integration and host boundaries |
+| [Storage contract](docs/storage.md) | Implement a production storage adapter |
+| [Security](SECURITY.md) | Review security expectations and report vulnerabilities |
+| [Contributing](CONTRIBUTING.md) | Set up development and contribute changes |
+| [Releases](docs/releases.md) | Configure publishing and release automation |
 
 ## License
 
