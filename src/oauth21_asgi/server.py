@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import secrets
 import time
 from collections.abc import Callable, Iterable
+from contextvars import Token
 from dataclasses import replace
 from typing import Any, TypeVar, cast
 from urllib.parse import urlsplit, urlunsplit
@@ -16,12 +18,15 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route
 
+from .cimd import ClientMetadataDocuments
 from .engine import Engine
 from .extensions import current_subject
 from .http import FormRequest, OAuthResponse, RegistrationRequest, response
 from .interfaces import Consent, Identity, RedirectPolicy, RegistrationHook, Storage
 from .models import (
     AuthorizationContext,
+    Client,
+    ClientMode,
     Decision,
     Limits,
     Paths,
@@ -33,6 +38,7 @@ from .policies import safe_uri
 from .storage import digest
 
 T = TypeVar("T")
+logger = logging.getLogger("oauth21_asgi.errors")
 
 
 class AuthorizationServer:
@@ -53,12 +59,23 @@ class AuthorizationServer:
         registration_hook: RegistrationHook | None = None,
         clock: Callable[[], float] = time.time,
         allow_loopback: bool = False,
+        client_mode: ClientMode = ClientMode.DCR_ONLY,
+        cimd: ClientMetadataDocuments | None = None,
     ) -> None:
         limits, paths = limits or Limits(), paths or Paths()
         if not safe_uri(issuer, allow_loopback=allow_loopback, issuer=True):
             raise ValueError("Issuer requires HTTPS; development loopback requires explicit opt-in")
         self.issuer, self.limits, self.paths, self.clock = issuer, limits, paths, clock
         self.identity, self.consent, self.registration_hook = identity, consent, registration_hook
+        try:
+            self.client_mode = ClientMode(client_mode)
+        except ValueError as exc:
+            raise ValueError("Unknown client mode") from exc
+        if (self.client_mode == ClientMode.DCR_ONLY) != (cimd is None):
+            raise ValueError("CIMD configuration must match the explicit client mode")
+        self.cimd = cimd
+        if cimd is not None:
+            cimd.bind(self, issuer=issuer, allow_loopback=allow_loopback)
         self.resources = frozenset(resources)
         scope_set = frozenset(scopes)
         if not self.resources or any(
@@ -92,6 +109,10 @@ class AuthorizationServer:
                 "authorization_response_iss_parameter_supported": True,
             }
         )
+        if self.client_mode == ClientMode.CIMD_ONLY:
+            self.metadata.pop("registration_endpoint", None)
+        if self.client_mode != ClientMode.DCR_ONLY:
+            self.metadata["client_id_metadata_document_supported"] = True
         self.metadata.validate()
         self.engine = Engine(
             identity=identity,
@@ -101,6 +122,7 @@ class AuthorizationServer:
             metadata=self.metadata,
             resources=self.resources,
             redirect_policy=redirect_policy,
+            client_mode=self.client_mode,
         )
         self.discovery_path = paths.metadata
         if paths.metadata == Paths().metadata and parts.path not in ("", "/"):
@@ -109,11 +131,14 @@ class AuthorizationServer:
     def mount(self, app: Starlette) -> None:
         routes = [
             Route(self.discovery_path, self.discovery, methods=["GET"]),
-            Route(self.paths.register, self.register, methods=["POST"]),
             Route(self.paths.authorize, self.authorize, methods=["GET", "POST"]),
             Route(self.paths.token, self.token, methods=["POST"]),
             Route(self.paths.revoke, self.revoke, methods=["POST"]),
         ]
+        if self.client_mode != ClientMode.CIMD_ONLY:
+            routes.append(Route(self.paths.register, self.register, methods=["POST"]))
+        if len({r.path for r in routes}) != len(routes):
+            raise ValueError("OAuth discovery path collides with an endpoint")
         existing = {getattr(r, "path", None) for r in app.router.routes}
         if any(r.path in existing for r in routes):
             raise ValueError("OAuth route collides with an existing host route")
@@ -177,6 +202,33 @@ class AuthorizationServer:
     async def invoke(self, callback: Callable[[], T]) -> T:
         return await run_in_threadpool(self.engine.transaction, callback)
 
+    async def resolve_client(self, pairs: Iterable[tuple[str, str]]) -> Token[Client | None]:
+        values = [value for key, value in pairs if key == "client_id"]
+        if len(values) > 1:
+            raise InvalidRequestError("Repeated client IDs are not supported.")
+        client: Client | None = None
+        if values and self.cimd is not None and ":" in values[0]:
+            client = await self.cimd.resolve(values[0], self.engine.cimd_client)
+        return self.engine.resolved_client.set(client)
+
+    def unavailable(self, endpoint: str, error: Exception) -> OAuthResponse:
+        # No exception text/traceback, URL, request headers, cookies or bodies.
+        # The locally generated ID is safe even when client correlation headers
+        # deliberately contain credential values.
+        incident = secrets.token_hex(8)
+        logger.error(
+            "OAuth operation failed",
+            extra={
+                "endpoint": endpoint,
+                "operation": "oauth_request",
+                "exception_class": type(error).__name__,
+                "incident_id": incident,
+            },
+        )
+        result = response(503, {"error": "temporarily_unavailable"}, [])
+        result.headers["X-OAuth-Incident-ID"] = incident
+        return result
+
     async def discovery(self, request: Request) -> Response:
         try:
             self.check_transport(request)
@@ -218,8 +270,8 @@ class AuthorizationServer:
             )
         except OAuth2Error as error:
             return self.error(error)
-        except Exception:
-            return response(503, {"error": "temporarily_unavailable"}, [])
+        except Exception as error:
+            return self.unavailable("register", error)
 
     async def token(self, request: Request) -> Response:
         return await self.credential_endpoint(request, None)
@@ -228,12 +280,14 @@ class AuthorizationServer:
         return await self.credential_endpoint(request, "revocation")
 
     async def credential_endpoint(self, request: Request, endpoint: str | None) -> Response:
+        marker: Token[Client | None] | None = None
         try:
             self.check_transport(request)
             prepared, pairs = await self.form(request)
             if "authorization" in request.headers or "client_secret" in dict(pairs):
                 raise InvalidClientError("Only public-client authentication is supported.")
             adapted = FormRequest("POST", str(request.url), pairs, prepared.headers)
+            marker = await self.resolve_client(pairs)
             callback = (
                 (lambda: self.engine.create_endpoint_response(endpoint, adapted))
                 if endpoint
@@ -242,8 +296,11 @@ class AuthorizationServer:
             return await self.invoke(callback)
         except OAuth2Error as error:
             return self.error(error)
-        except Exception:
-            return response(503, {"error": "temporarily_unavailable"}, [])
+        except Exception as error:
+            return self.unavailable(endpoint or "token", error)
+        finally:
+            if marker is not None:
+                self.engine.resolved_client.reset(marker)
 
     def context(self, grant: Any, subject: Subject) -> AuthorizationContext:
         req = grant.request
@@ -255,9 +312,11 @@ class AuthorizationServer:
             self.engine.resource_binding.resource(req),
             req.payload.state,
             subject,
+            req.client.metadata_origin,
         )
 
     async def authorize(self, request: Request) -> Response:
+        marker: Token[Client | None] | None = None
         try:
             self.check_transport(request)
             if request.method == "POST":
@@ -265,6 +324,7 @@ class AuthorizationServer:
             adapted = FormRequest(
                 "GET", str(request.url), request.query_params.multi_items(), request.headers
             )
+            marker = await self.resolve_client(request.query_params.multi_items())
 
             def validate() -> Any:
                 try:
@@ -296,6 +356,7 @@ class AuthorizationServer:
                         self.clock() + self.limits.consent_ttl,
                     )
                 )
+                self.engine.touch_client(context.client_id)
 
             await self.invoke(save)
             result = await self.consent.render(request, context, consent_token)
@@ -314,8 +375,11 @@ class AuthorizationServer:
             return result
         except OAuth2Error as error:
             return self.error(error, callback=True)
-        except Exception:
-            return response(503, {"error": "temporarily_unavailable"}, [])
+        except Exception as error:
+            return self.unavailable("authorize", error)
+        finally:
+            if marker is not None:
+                self.engine.resolved_client.reset(marker)
 
     async def confirm(self, request: Request) -> Response:
         prepared, pairs = await self.form(request)
@@ -333,6 +397,21 @@ class AuthorizationServer:
         subject = await self.identity.authenticate(prepared)
         if isinstance(subject, Response):
             return subject
+
+        def saved_parameters() -> dict[str, str]:
+            pending = self.engine.uow.get().get_pending(digest(token))
+            if not pending or pending.expires_at <= self.clock() or pending.subject != subject:
+                raise InvalidRequestError("Consent expired or subject changed.")
+            return dict(pending.parameters)
+
+        parameters = await self.invoke(saved_parameters)
+        marker = await self.resolve_client(parameters.items())
+        try:
+            return await self.complete_consent(prepared, subject, token)
+        finally:
+            self.engine.resolved_client.reset(marker)
+
+    async def complete_consent(self, prepared: Request, subject: Subject, token: str) -> Response:
 
         def load() -> Any:
             pending = self.engine.uow.get().get_pending(digest(token))
@@ -356,7 +435,7 @@ class AuthorizationServer:
         def complete() -> Response:
             unit = self.engine.uow.get()
             pending = unit.get_pending(digest(token))
-            if not pending or pending.subject != subject:
+            if not pending or pending.expires_at <= self.clock() or pending.subject != subject:
                 raise InvalidRequestError("Consent already consumed.")
             current_subject(self.identity, subject)
             adapted = FormRequest(
@@ -402,7 +481,11 @@ class AuthorizationServer:
                 or grant.revoked
                 or grant.resource != resource
                 or grant.access_expires_at <= self.clock()
+                or grant.expires_at <= self.clock()
                 or not set(scopes).issubset(grant.scope.split())
+                or not set(grant.scope.split()).issubset(self.metadata["scopes_supported"])
+                or (self.client_mode == ClientMode.CIMD_ONLY and grant.client_source != "cimd")
+                or (self.client_mode == ClientMode.DCR_ONLY and grant.client_source != "dcr")
             ):
                 return None
             try:
@@ -410,6 +493,7 @@ class AuthorizationServer:
             except OAuth2Error:
                 unit.put_grant(replace(grant, revoked=True))
                 return None
+            self.engine.touch_client(grant.client_id)
             return Principal(
                 subject,
                 grant.client_id,

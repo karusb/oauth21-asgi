@@ -10,6 +10,7 @@ The package embeds Authlib's framework-independent AuthorizationServer in Starle
 | Public-client authentication | Authlib ClientAuthentication and ClientMixin |
 | PKCE | Authlib CodeChallenge; public subclass requires S256 and valid input syntax |
 | Dynamic registration | Authlib ClientRegistrationEndpoint and ClientMetadataClaims |
+| CIMD client identity | Async bounded resolver/transport and cache; Authlib metadata claims and normal ClientMixin objects |
 | Registered callback checks | Authlib grants and exact ClientMixin membership |
 | OAuth errors / responses | Authlib OAuth2Error and response generation |
 | Revocation | Authlib RevocationEndpoint with host family callback |
@@ -38,3 +39,15 @@ Primary references: [generic server](https://docs.authlib.org/en/stable/oauth2/a
 The package owns bounded/duplicate-safe request adaptation, explicit S256/public-only restrictions, exact resource/redirect policy, digested transaction callbacks, rotation/replay/absolute expiry, fresh subject checks and consent binding. Constant-time digest comparisons protect direct comparisons; digest-indexed lookups use high-entropy credentials.
 
 Tests exercise actual Authlib methods, both resource audiences, callback errors, single-use/concurrent exchanges, concurrent refresh/replay, commit failures and credential secrecy. Development MemoryStorage supplies rollback and single-process serialization; production adapters must meet the [atomic storage contract](storage.md).
+
+## Client resolution
+
+`ClientMode` is explicit and defaults to DCR-only. The ASGI resolver extracts exactly one client ID and, only in CIMD-enabled modes, asynchronously resolves URI-shaped IDs. Authlib's synchronous `query_client()` reads the request-local normal Client through a separate ContextVar; opaque DCR clients are read from the transactional store only in DCR-enabled modes. Cleanup always resets request-local state, including errors, cancellation and consent POST. No production monkeypatches or global request-client state are used.
+
+CIMD uses public Authlib metadata claims for OAuth validation, plus project-owned draft identity, public-auth intersection, host policy and network/cache checks. Its fetch completes outside storage transactions and never inserts persistent clients. Codes/grants identify their source. Mode changes cannot reuse cached CIMD clients or stored DCR credentials through the wrong source. See [CIMD](cimd.md) for draft revision, transport and cache limits.
+
+The built-in optional aiohttp resolver vets every resolved IP and returns those addresses directly to the public TCPConnector, retaining original Host/SNI and certificate verification. Request-local OAuth handling remains separate from DNS/network work. Ordinary DCR imports and operations do not load this transport or require aiohttp.
+
+Security wrappers are checked under strict mypy. Untyped Authlib mixin inheritance has local documented ignores; project callbacks and hook boundaries have explicit types/Protocols. The token logging filter matches the exact upstream token-dictionary event rather than silencing whole log levels. Sanitized diagnostics report unexpected failures without exception text or tracebacks.
+
+Validation combines transactional/unit coverage with clean installed-wheel subprocesses, real TCP, verified HTTPS through Caddy and optional official MCP SDK interoperability. The runtime does not depend on MCP or OpenAI.

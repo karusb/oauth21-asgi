@@ -7,7 +7,16 @@ from typing import Protocol
 from starlette.requests import Request
 from starlette.responses import Response
 
-from .models import AuthorizationContext, Client, Code, Decision, Grant, PendingConsent, Subject
+from .models import (
+    AuthorizationContext,
+    Client,
+    Code,
+    Decision,
+    Grant,
+    PendingConsent,
+    Subject,
+    TokenKind,
+)
 
 
 class Identity(Protocol):
@@ -48,7 +57,7 @@ class UnitOfWork(Protocol):
     def get_grant(self, family_id: str) -> Grant | None: ...
     def put_grant(self, grant: Grant) -> None: ...
     def grants(self) -> list[Grant]: ...
-    def find_token(self, digest: str, kind: str) -> Grant | None: ...
+    def find_token(self, digest: str, kind: TokenKind) -> Grant | None: ...
     def prune(self, now: float, client_ttl: int) -> None: ...
 
 

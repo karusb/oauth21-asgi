@@ -6,22 +6,22 @@
 ![ASGI / FastAPI](https://img.shields.io/badge/ASGI-FastAPI-009688)
 [![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue)](https://github.com/karusb/oauth21-asgi/blob/main/LICENSE)
 
-Add an Authorization Server for public clients with mandatory PKCE S256, Dynamic Client Registration and resource-bound opaque tokens. Your application owns login, consent and storage; Authlib handles the OAuth protocol.
+Add an Authorization Server for public clients with mandatory PKCE S256, optional Client ID Metadata Documents (CIMD), Dynamic Client Registration and resource-bound opaque tokens. Your application owns login, consent and storage; Authlib handles the OAuth protocol.
 
-[Quick start](#quick-start) · [App integration](#mount-in-your-application) · [Client flow](#public-client-flow) · [Resource servers](#resource-server-integration) · [Documentation](#documentation)
+[Quick start](#quick-start) · [Client modes](#client-modes) · [App integration](#mount-in-your-application) · [Client flow](#public-client-flow) · [Documentation](#documentation)
 
 ## Features
 
 | Capability | What you get |
 | --- | --- |
 | Authorization | Authorization Code, public-client authentication (`none`) and mandatory PKCE S256 |
-| Discovery & registration | Dynamic Client Registration (RFC 7591), server discovery (RFC 8414) and callback issuer identification (RFC 9207) |
+| Client identity | Explicit DCR-only, CIMD-only or combined modes; discovery (RFC 8414) and callback issuer identification (RFC 9207) |
 | Resource binding | Exact audiences (RFC 8707), configurable scopes and redirect policies |
 | Token lifecycle | Single-use codes, rotating refresh tokens, replay-family revocation, absolute grant lifetimes and revocation (RFC 7009) |
 | Host integration | Transactional storage contracts, account-version invalidation and browser-bound, one-use consent tickets |
 | Request protection | Bounded requests, duplicate-parameter rejection, non-cacheable OAuth responses and credential digests at rest |
 
-**Scope:** a focused public-client profile, without OIDC, JWT access tokens, confidential clients, password grants, social login, CIMD or token introspection. This project is not an OAuth certification.
+**Scope:** a focused public-client profile, without OIDC, JWT access tokens, confidential clients, password grants, social login or token introspection. CIMD targets Internet-Draft `-02`, not a final RFC. No OAuth, MCP or ChatGPT certification is claimed.
 
 ## Quick start
 
@@ -43,6 +43,54 @@ Open [http://127.0.0.1:8000/login](http://127.0.0.1:8000/login) to try the demo 
 > The demo login and `MemoryStorage` are for development only. The example explicitly enables HTTP loopback; public issuers require HTTPS.
 
 For Starlette, install `oauth21-asgi` without the FastAPI extra. Runtime dependencies are Authlib, Starlette and python-multipart; no database driver or MCP SDK is required.
+
+## Client modes
+
+CIMD is the preferred portable client identity mechanism in current MCP authorization. DCR remains available for compatibility. The default is **DCR only**, preserving existing installations without enabling outbound metadata requests.
+
+| Mode | Registration route / metadata | CIMD advertised / fetched |
+| --- | --- | --- |
+| `DCR_ONLY` | Enabled | Disabled |
+| `CIMD_ONLY` | Absent | Enabled |
+| `CIMD_AND_DCR` | Enabled | Enabled |
+
+Import configuration from the public API:
+
+```python
+from oauth21_asgi import AuthorizationServer, ClientMetadataDocuments, ClientMode
+```
+
+### DCR only
+
+```python
+AuthorizationServer(..., client_mode=ClientMode.DCR_ONLY)
+```
+
+### CIMD only
+
+Install `oauth21-asgi[fastapi,cimd]` for the built-in async, TLS-verified metadata fetcher:
+
+```python
+AuthorizationServer(
+    ...,
+    client_mode=ClientMode.CIMD_ONLY,
+    cimd=ClientMetadataDocuments(),
+)
+```
+
+### CIMD + DCR
+
+```python
+AuthorizationServer(
+    ...,
+    client_mode=ClientMode.CIMD_AND_DCR,
+    cimd=ClientMetadataDocuments(),
+)
+```
+
+In combined mode, opaque registered IDs use storage; URL client IDs use CIMD. Failed CIMD validation **never falls back to DCR**. Switching to CIMD-only makes stored DCR integrations and their tokens unusable until they adopt CIMD or DCR is re-enabled; records are not destructively deleted by the switch. DCR-only disables all CIMD fetching. Missing or contradictory CIMD configuration fails at startup.
+
+See the [CIMD guide](https://github.com/karusb/oauth21-asgi/blob/main/docs/cimd.md) for metadata, network policy, caching and migration details.
 
 ## Mount in your application
 
@@ -76,7 +124,7 @@ oauth.mount(app)
 
 Default routes follow this flow:
 
-**Discover → Register → Authorize + consent → Exchange → Refresh or revoke**
+**Discover → Register (DCR) or use metadata URL (CIMD) → Authorize + consent → Exchange → Refresh or revoke**
 
 ### 1. Discover and register
 
@@ -93,7 +141,7 @@ Read `/.well-known/oauth-authorization-server`, then POST JSON to `/oauth/regist
 }
 ```
 
-The registration response contains a random client ID and no client secret. This profile defaults omitted auth method to `none`, grants to code/refresh and scope to configured scopes. Registration is public; use `registration_hook` and host middleware for rate control.
+The registration response contains a random client ID and no client secret. This profile defaults omitted auth method to `none`, grants to code/refresh and scope to configured scopes. Registration is public; use `registration_hook` and host middleware for rate control. A CIMD client skips registration and uses its validated HTTPS metadata document URL as the client ID.
 
 ### 2. Authorize
 
@@ -127,15 +175,15 @@ principal = oauth.validate_access_token(
 
 `oauth.revoke_subject(subject_id)` invalidates grants, codes and pending consents. `oauth.prune()` runs storage cleanup. Keep these administrative operations behind host authorization.
 
-MCP hosts can use this package as their Authorization Server while the official MCP SDK owns protected-resource discovery, challenges, tool metadata and request authentication. The protocol suite includes a ChatGPT-compatible DCR/PKCE flow with both documented callback forms; this is a compatibility test, not hosted-client certification.
+MCP hosts can use this package as their Authorization Server while the official MCP SDK owns protected-resource discovery, challenges, tool metadata and request authentication. Installed-wheel tests exercise real TCP, verified HTTPS through Caddy and MCP tool calls in all modes. Local ChatGPT-style DCR/CIMD fixtures cover documented callbacks and public auth-method negotiation; these are compatibility tests, not hosted-client certification.
 
 ## Configuration and security
 
 `Limits` configures body/query sizes, client/code/consent/family capacities, refresh rotation bounds and TTLs. `Paths` configures all endpoint routes. Issuers with path components use RFC 8414 discovery path insertion. Route collisions fail explicitly. `oauth.engine` exposes the real Authlib server for supported public extensions.
 
-`ExactRedirectPolicy` requires safe HTTPS and exact membership. `CallableRedirectPolicy` checks URI safety before applying your predicate. Loopback callbacks require explicit opt-in. No metadata URL is fetched.
+`ExactRedirectPolicy` requires safe HTTPS and exact membership. `CallableRedirectPolicy` checks URI safety before applying your predicate. Loopback callbacks require explicit opt-in. Only CIMD-enabled modes fetch metadata; branding and JWKS URLs are never fetched.
 
-Codes/access/refresh credentials are random 256-bit secrets with SHA-256 digests at rest. Clients and resource audiences match exactly. Storage failures fail closed. Authlib's token-bearing DEBUG grant logs are filtered; infrastructure must independently redact request bodies, credentials and callback queries. See [SECURITY.md](https://github.com/karusb/oauth21-asgi/blob/main/SECURITY.md), [architecture](https://github.com/karusb/oauth21-asgi/blob/main/docs/architecture.md) and [storage](https://github.com/karusb/oauth21-asgi/blob/main/docs/storage.md).
+Codes/access/refresh credentials are random 256-bit secrets with SHA-256 digests at rest. Clients and resource audiences match exactly. Storage failures fail closed with sanitized internal diagnostics. Active DCR clients are protected from registration-age expiry; successful use updates inactivity tracking. Only Authlib's token-dictionary log event is filtered. Infrastructure must independently redact credentials and callback queries. See [SECURITY.md](https://github.com/karusb/oauth21-asgi/blob/main/SECURITY.md), [architecture](https://github.com/karusb/oauth21-asgi/blob/main/docs/architecture.md) and [storage](https://github.com/karusb/oauth21-asgi/blob/main/docs/storage.md).
 
 ## Development and releases
 
@@ -161,6 +209,8 @@ CI runs all supported interpreters and checks the wheel installed outside the so
 | --- | --- |
 | [Architecture](https://github.com/karusb/oauth21-asgi/blob/main/docs/architecture.md) | Understand the Authlib integration and host boundaries |
 | [Storage contract](https://github.com/karusb/oauth21-asgi/blob/main/docs/storage.md) | Implement a production storage adapter |
+| [CIMD](https://github.com/karusb/oauth21-asgi/blob/main/docs/cimd.md) | Configure metadata resolution, caching and network protection |
+| [Engineering audit](https://github.com/karusb/oauth21-asgi/blob/main/docs/audit.md) | Review findings, validation and remaining acceptance work |
 | [Security](https://github.com/karusb/oauth21-asgi/blob/main/SECURITY.md) | Review security expectations and report vulnerabilities |
 | [Contributing](https://github.com/karusb/oauth21-asgi/blob/main/CONTRIBUTING.md) | Develop, contribute and publish releases |
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import html
 import os
 import secrets
+from collections.abc import Iterable
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
@@ -14,6 +15,8 @@ from starlette.responses import HTMLResponse, RedirectResponse
 from oauth21_asgi import (
     AuthorizationContext,
     AuthorizationServer,
+    ClientMetadataDocuments,
+    ClientMode,
     Decision,
     ExactRedirectPolicy,
     MemoryStorage,
@@ -40,7 +43,7 @@ class DemoConsent:
         self, request: Request, context: AuthorizationContext, consent_token: str
     ) -> HTMLResponse:
         # Registered branding is untrusted. Escape all displayed values; never fetch logos.
-        text = f"{context.client_name} requests {', '.join(context.scopes)} for {context.resource}"
+        text = f"{context.client_name} ({context.client_origin or 'registered client'}) requests {', '.join(context.scopes)} for {context.resource}"
         return HTMLResponse(
             "<h1>Allow application access?</h1><p>" + html.escape(text) + "</p>"
             '<form method="post" action="/oauth/authorize">'
@@ -58,6 +61,9 @@ def create_app(
     *,
     issuer: str = "https://video.example.test/",
     callback: str = "https://client.example.test/callback",
+    client_mode: ClientMode = ClientMode.DCR_ONLY,
+    cimd: ClientMetadataDocuments | None = None,
+    resources: Iterable[str] | None = None,
 ) -> FastAPI:
     """Demo host only. The default HTTPS issuer also supports in-process TestClient tests."""
     app = FastAPI()
@@ -72,11 +78,13 @@ def create_app(
     oauth = AuthorizationServer(
         issuer=issuer,
         scopes={"read", "write"},
-        resources={issuer.rstrip("/") + "/api"},
+        resources=resources if resources is not None else {issuer.rstrip("/") + "/api"},
         storage=MemoryStorage(),
         identity=identity,
         consent=DemoConsent(),
         redirect_policy=ExactRedirectPolicy({callback}),
+        client_mode=client_mode,
+        cimd=cimd,
         allow_loopback=urlsplit(issuer).hostname in {"localhost", "127.0.0.1", "::1"},
     )
     oauth.mount(app)

@@ -8,8 +8,10 @@ from authlib.oauth2.rfc6749 import JsonRequest, OAuth2Payload, OAuth2Request
 from authlib.oauth2.rfc6749.requests import JsonPayload
 from starlette.responses import JSONResponse, Response
 
+from .models import Client, Code, Grant, Subject
 
-class Payload(OAuth2Payload):
+
+class Payload(OAuth2Payload):  # type: ignore[misc] # untyped upstream adapter base
     def __init__(self, pairs: Iterable[tuple[str, str]]) -> None:
         self._data: dict[str, str] = {}
         self._datalist: defaultdict[str, list[str]] = defaultdict(list)
@@ -26,7 +28,14 @@ class Payload(OAuth2Payload):
         return self._datalist
 
 
-class FormRequest(OAuth2Request):
+class FormRequest(OAuth2Request):  # type: ignore[misc] # untyped upstream adapter base
+    payload: Payload
+    client: Client
+    user: Subject
+    authorization_code: Code
+    refresh_token: Grant | None
+    scope: str
+
     def __init__(
         self, method: str, uri: str, pairs: Iterable[tuple[str, str]], headers: Any
     ) -> None:
@@ -42,7 +51,7 @@ class FormRequest(OAuth2Request):
         return self.payload.data
 
 
-class JSONPayload(JsonPayload):
+class JSONPayload(JsonPayload):  # type: ignore[misc] # untyped upstream adapter base
     def __init__(self, data: dict[str, Any]) -> None:
         self._data = data
 
@@ -51,7 +60,7 @@ class JSONPayload(JsonPayload):
         return self._data
 
 
-class RegistrationRequest(JsonRequest):
+class RegistrationRequest(JsonRequest):  # type: ignore[misc] # untyped upstream adapter base
     def __init__(self, uri: str, data: dict[str, Any], headers: Any) -> None:
         super().__init__("POST", uri, headers=headers)
         self.payload = JSONPayload(data)

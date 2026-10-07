@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Literal
 
 from authlib.oauth2.rfc6749 import AuthorizationCodeMixin, ClientMixin, TokenMixin
 
@@ -18,8 +19,17 @@ class Decision(StrEnum):
     DENY = "deny"
 
 
+class ClientMode(StrEnum):
+    DCR_ONLY = "dcr"
+    CIMD_ONLY = "cimd"
+    CIMD_AND_DCR = "cimd+dcr"
+
+
+TokenKind = Literal["access_token", "refresh_token"]
+
+
 @dataclass(frozen=True)
-class Client(ClientMixin):
+class Client(ClientMixin):  # type: ignore[misc] # upstream mixin has no type stubs
     client_id: str
     redirect_uris: tuple[str, ...]
     scope: str
@@ -27,6 +37,8 @@ class Client(ClientMixin):
     response_types: tuple[str, ...] = ("code",)
     client_name: str = ""
     issued_at: float = 0
+    last_used_at: float | None = None
+    metadata_origin: str | None = None
 
     def get_client_id(self) -> str:
         return self.client_id
@@ -56,7 +68,7 @@ class Client(ClientMixin):
 
 
 @dataclass(frozen=True)
-class Code(AuthorizationCodeMixin):
+class Code(AuthorizationCodeMixin):  # type: ignore[misc] # upstream mixin has no type stubs
     digest: str
     client_id: str
     subject: Subject
@@ -66,6 +78,7 @@ class Code(AuthorizationCodeMixin):
     code_challenge: str
     expires_at: float
     code_challenge_method: str = "S256"
+    client_source: Literal["dcr", "cimd"] = "dcr"
 
     def get_redirect_uri(self) -> str:
         return self.redirect_uri
@@ -75,7 +88,7 @@ class Code(AuthorizationCodeMixin):
 
 
 @dataclass(frozen=True)
-class Grant(TokenMixin):
+class Grant(TokenMixin):  # type: ignore[misc] # upstream mixin has no type stubs
     family_id: str
     client_id: str
     subject: Subject
@@ -88,9 +101,12 @@ class Grant(TokenMixin):
     refresh_digest: str | None = None
     used_refresh: tuple[str, ...] = ()
     revoked: bool = False
+    client_source: Literal["dcr", "cimd"] = "dcr"
 
     def check_client(self, client: Client) -> bool:
-        return self.client_id == client.client_id
+        return self.client_id == client.client_id and self.client_source == (
+            "cimd" if client.metadata_origin is not None else "dcr"
+        )
 
     def get_scope(self) -> str:
         return self.scope
@@ -113,6 +129,7 @@ class AuthorizationContext:
     resource: str
     state: str | None
     subject: Subject
+    client_origin: str | None = None
 
 
 @dataclass(frozen=True)

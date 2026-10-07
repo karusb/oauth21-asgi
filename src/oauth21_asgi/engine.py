@@ -5,7 +5,7 @@ import secrets
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import replace
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from authlib.oauth2.rfc6749 import AuthorizationServer as AuthlibServer
 from authlib.oauth2.rfc6749 import InvalidGrantError, InvalidRequestError, InvalidScopeError
@@ -16,10 +16,11 @@ from authlib.oauth2.rfc7591 import ClientMetadataClaims, ClientRegistrationEndpo
 from authlib.oauth2.rfc7591.errors import InvalidClientMetadataError
 from joserfc.errors import InvalidClaimError
 
+from .cimd import MetadataFetchError
 from .extensions import ExactIssuer, MandatoryS256, ResourceBinding, current_subject
 from .http import FormRequest, OAuthResponse, RegistrationRequest, response
 from .interfaces import Identity, RedirectPolicy, Storage, UnitOfWork
-from .models import Client, Code, Grant, Limits
+from .models import Client, ClientMode, Code, Grant, Limits, Subject, TokenKind
 from .storage import digest
 
 T = TypeVar("T")
@@ -29,16 +30,20 @@ class NoCredentialDebug(logging.Filter):
     """Authlib 1.8 grant DEBUG messages contain complete issued token dictionaries."""
 
     def filter(self, record: logging.LogRecord) -> bool:
-        return record.levelno >= logging.WARNING
+        # Only the verified Authlib 1.8 token-dictionary event is suppressed.
+        # Do not format the record: formatting would itself expose credentials.
+        return record.msg != "Issue token %r to %r"
 
 
-class PublicCodeGrant(AuthorizationCodeGrant):
+class PublicCodeGrant(AuthorizationCodeGrant):  # type: ignore[misc] # untyped Authlib base
+    server: Engine
+    request: FormRequest
     TOKEN_ENDPOINT_AUTH_METHODS = ["none"]
 
     def generate_authorization_code(self) -> str:
         return secrets.token_urlsafe(32)
 
-    def save_authorization_code(self, code: str, request: Any) -> None:
+    def save_authorization_code(self, code: str, request: FormRequest) -> None:
         engine = self.server
         if len(engine.uow.get().codes()) >= engine.limits.authorization_codes:
             raise InvalidRequestError(
@@ -54,29 +59,44 @@ class PublicCodeGrant(AuthorizationCodeGrant):
                 engine.resource_binding.resource(request),
                 request.payload.data["code_challenge"],
                 engine.clock() + engine.limits.code_ttl,
+                client_source="cimd" if request.client.metadata_origin is not None else "dcr",
             )
         )
+        engine.touch_client(request.client.client_id)
 
     def query_authorization_code(self, code: str, client: Client) -> Code | None:
         value = self.server.uow.get().get_code(digest(code))
-        if value and value.client_id == client.client_id and value.expires_at > self.server.clock():
+        if (
+            value
+            and value.client_id == client.client_id
+            and value.expires_at > self.server.clock()
+            and value.client_source == ("cimd" if client.metadata_origin is not None else "dcr")
+        ):
             return value
         return None
 
     def delete_authorization_code(self, authorization_code: Code) -> None:
         self.server.uow.get().delete_code(authorization_code.digest)
 
-    def authenticate_user(self, authorization_code: Code) -> Any:
+    def authenticate_user(self, authorization_code: Code) -> Subject:
         return current_subject(self.server.identity, authorization_code.subject)
 
 
-class PublicRefreshGrant(RefreshTokenGrant):
+class PublicRefreshGrant(RefreshTokenGrant):  # type: ignore[misc] # untyped Authlib base
+    server: Engine
+    request: FormRequest
     TOKEN_ENDPOINT_AUTH_METHODS = ["none"]
     INCLUDE_NEW_REFRESH_TOKEN = True
 
     def validate_token_request(self) -> None:
         super().validate_token_request()
-        self.server.validate_requested_scope(self.request.payload.scope)
+        old = self.request.refresh_token
+        if old is None:
+            raise InvalidGrantError()
+        scope = self.request.payload.data.get("scope", old.scope)
+        self.server.validate_requested_scope(scope)
+        if self.request.client.get_allowed_scope(scope) is None:
+            raise InvalidScopeError()
 
     def authenticate_refresh_token(self, refresh_token: str) -> Grant | None:
         engine = self.server
@@ -98,11 +118,11 @@ class PublicRefreshGrant(RefreshTokenGrant):
             return None
         return grant
 
-    def authenticate_user(self, refresh_token: Grant) -> Any:
+    def authenticate_user(self, refresh_token: Grant) -> Subject:
         return current_subject(self.server.identity, refresh_token.subject)
 
-    def issue_token(self, user: Any, refresh_token: Grant) -> dict[str, Any]:
-        token = super().issue_token(user, refresh_token)
+    def issue_token(self, user: Subject, refresh_token: Grant) -> dict[str, Any]:
+        token = cast(dict[str, Any], super().issue_token(user, refresh_token))
         remaining = int(refresh_token.expires_at - self.server.clock())
         if remaining < 1:
             raise InvalidGrantError()
@@ -114,12 +134,15 @@ class PublicRefreshGrant(RefreshTokenGrant):
         pass
 
 
-class PublicRevocation(RevocationEndpoint):
+class PublicRevocation(RevocationEndpoint):  # type: ignore[misc] # untyped Authlib base
+    server: Engine
     CLIENT_AUTH_METHODS = ["none"]
 
     def query_token(self, token: str, token_type_hint: str | None) -> Grant | None:
         fingerprint = digest(token)
-        kinds = [token_type_hint] if token_type_hint else []
+        kinds: list[TokenKind] = []
+        if token_type_hint in ("access_token", "refresh_token"):
+            kinds.append(cast(TokenKind, token_type_hint))
         kinds += [k for k in ("access_token", "refresh_token") if k not in kinds]
         for kind in kinds:
             grant = self.server.uow.get().find_token(fingerprint, kind)
@@ -127,25 +150,31 @@ class PublicRevocation(RevocationEndpoint):
                 return grant
         return None
 
-    def revoke_token(self, token: Grant, request: Any) -> None:
+    def revoke_token(self, token: Grant, request: FormRequest) -> None:
         self.server.uow.get().put_grant(replace(token, revoked=True))
+        self.server.touch_client(token.client_id)
 
 
-class OpenRegistration(ClientRegistrationEndpoint):
-    def authenticate_token(self, request: Any) -> bool:
+class OpenRegistration(ClientRegistrationEndpoint):  # type: ignore[misc] # untyped Authlib base
+    server: Engine
+
+    def authenticate_token(self, request: RegistrationRequest) -> bool:
         return True
 
     def get_server_metadata(self) -> dict[str, Any]:
         return self.server.metadata
 
-    def generate_client_info(self, request: Any) -> dict[str, Any]:
+    def generate_client_info(self, request: RegistrationRequest) -> dict[str, Any]:
         return {
             "client_id": secrets.token_urlsafe(24),
             "client_id_issued_at": int(self.server.clock()),
         }
 
     def save_client(
-        self, client_info: dict[str, Any], client_metadata: dict[str, Any], request: Any
+        self,
+        client_info: dict[str, Any],
+        client_metadata: dict[str, Any],
+        request: RegistrationRequest,
     ) -> Client:
         engine = self.server
         if len(engine.uow.get().clients()) >= engine.limits.registered_clients:
@@ -163,7 +192,7 @@ class OpenRegistration(ClientRegistrationEndpoint):
         return client
 
 
-class Engine(AuthlibServer):
+class Engine(AuthlibServer):  # type: ignore[misc] # untyped Authlib server base
     def __init__(
         self,
         *,
@@ -174,10 +203,13 @@ class Engine(AuthlibServer):
         metadata: dict[str, Any],
         resources: frozenset[str],
         redirect_policy: RedirectPolicy,
+        client_mode: ClientMode = ClientMode.DCR_ONLY,
     ) -> None:
         super().__init__(scopes_supported=metadata["scopes_supported"])
         self.identity, self.storage, self.limits, self.clock = identity, storage, limits, clock
         self.metadata = metadata
+        self.client_mode = client_mode
+        self.resolved_client: ContextVar[Client | None] = ContextVar("oauth21_client", default=None)
         self.uow: ContextVar[UnitOfWork] = ContextVar("oauth21_unit_of_work")
         self.resource_binding = ResourceBinding(resources)
         self.issuer_parameter = ExactIssuer(metadata["issuer"])
@@ -191,7 +223,7 @@ class Engine(AuthlibServer):
         self.register_endpoint(PublicRevocation)
         profile_scopes = " ".join(metadata["scopes_supported"])
 
-        class ProfileMetadata(ClientMetadataClaims):
+        class ProfileMetadata(ClientMetadataClaims):  # type: ignore[misc] # untyped Authlib claims
             def validate(self, now: Any = None, leeway: int = 0) -> None:
                 self.setdefault("token_endpoint_auth_method", "none")
                 self.setdefault("grant_types", ["authorization_code", "refresh_token"])
@@ -237,7 +269,9 @@ class Engine(AuthlibServer):
                 ]:
                     raise InvalidClaimError("grant_types")
 
-        self.register_endpoint(OpenRegistration(self, claims_classes=[ProfileMetadata]))
+        if client_mode != ClientMode.CIMD_ONLY:
+            self.register_endpoint(OpenRegistration(self, claims_classes=[ProfileMetadata]))
+        self.client_claims = ProfileMetadata
         self.register_token_generator(
             "default",
             BearerTokenGenerator(
@@ -257,7 +291,78 @@ class Engine(AuthlibServer):
                 self.uow.reset(marker)
 
     def query_client(self, client_id: str) -> Client | None:
+        if self.client_mode != ClientMode.DCR_ONLY and ":" in client_id:
+            client = self.resolved_client.get()
+            return client if client and client.client_id == client_id else None
+        if self.client_mode == ClientMode.CIMD_ONLY:
+            return None
         return self.uow.get().get_client(client_id)
+
+    def cimd_client(self, document: dict[str, Any]) -> Client:
+        data = dict(document)
+        if any(name in data for name in ("client_secret", "client_secret_expires_at")):
+            raise MetadataFetchError("Shared credentials are not permitted")
+        jwks = data.pop("jwks", None)
+        if jwks is not None:
+            # No key verification is implemented. Reject embedded keys rather
+            # than inadvertently accepting private or symmetric key material.
+            raise MetadataFetchError("Embedded keys are outside this public-client profile")
+        data.pop("jwks_uri", None)  # Public branding/key references are never fetched.
+        methods = data.pop("token_endpoint_auth_methods_supported", None)
+        if methods is not None:
+            if (
+                not isinstance(methods, list)
+                or not methods
+                or not all(isinstance(value, str) for value in methods)
+                or len(set(methods)) != len(methods)
+                or "none" not in methods
+            ):
+                raise MetadataFetchError("No supported client authentication method")
+            if any(method.startswith("client_secret_") for method in methods):
+                raise MetadataFetchError("Shared-secret authentication is not permitted")
+            data["token_endpoint_auth_method"] = PublicCodeGrant.TOKEN_ENDPOINT_AUTH_METHODS[0]
+        elif data.get("token_endpoint_auth_method", "none") != "none":
+            raise MetadataFetchError("No supported client authentication method")
+        for name, allowed, required in (
+            ("grant_types", ("authorization_code", "refresh_token"), "authorization_code"),
+            ("response_types", ("code",), "code"),
+        ):
+            values = data.get(name, list(allowed))
+            if (
+                not isinstance(values, list)
+                or not all(isinstance(v, str) for v in values)
+                or (len(set(values)) != len(values) or required not in values)
+            ):
+                raise MetadataFetchError("Incompatible client capabilities")
+            data[name] = [v for v in values if v in allowed]
+        try:
+            options = self.client_claims.get_claims_options(self.metadata)
+            claims = self.client_claims(data, {}, options, self.metadata)
+            claims.validate()
+        except InvalidClaimError as exc:
+            raise MetadataFetchError("Invalid client metadata") from exc
+        from urllib.parse import urlsplit
+
+        parts = urlsplit(data["client_id"])
+        return Client(
+            data["client_id"],
+            tuple(claims["redirect_uris"]),
+            claims["scope"],
+            tuple(claims["grant_types"]),
+            tuple(claims["response_types"]),
+            claims.get("client_name", ""),
+            metadata_origin=f"{parts.scheme}://{parts.netloc}",
+        )
+
+    def touch_client(self, client_id: str) -> None:
+        if self.client_mode == ClientMode.CIMD_ONLY or (
+            self.client_mode != ClientMode.DCR_ONLY and ":" in client_id
+        ):
+            return
+        unit = self.uow.get()
+        client = unit.get_client(client_id)
+        if client:
+            unit.put_client(replace(client, last_used_at=self.clock()))
 
     def create_oauth2_request(self, request: FormRequest) -> FormRequest:
         return request
@@ -282,7 +387,7 @@ class Engine(AuthlibServer):
         ):
             raise InvalidScopeError()
 
-    def save_token(self, token: dict[str, Any], request: Any) -> None:
+    def save_token(self, token: dict[str, Any], request: FormRequest) -> None:
         unit, now = self.uow.get(), self.clock()
         old: Grant | None = request.refresh_token
         if old:
@@ -311,5 +416,7 @@ class Engine(AuthlibServer):
                 now + token["expires_in"],
                 digest(token["access_token"]),
                 digest(token["refresh_token"]) if "refresh_token" in token else None,
+                client_source="cimd" if request.client.metadata_origin is not None else "dcr",
             )
         unit.put_grant(grant)
+        self.touch_client(request.client.client_id)

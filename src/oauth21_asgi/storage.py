@@ -9,7 +9,7 @@ from dataclasses import asdict
 from threading import RLock
 from typing import Any
 
-from .models import Client, Code, Grant, PendingConsent, Subject
+from .models import Client, Code, Grant, PendingConsent, Subject, TokenKind
 
 
 def digest(secret: str) -> str:
@@ -72,7 +72,9 @@ class MemoryUnitOfWork:
     def grants(self) -> list[Grant]:
         return list(self.data["grants"].values())
 
-    def find_token(self, fingerprint: str, kind: str) -> Grant | None:
+    def find_token(self, fingerprint: str, kind: TokenKind) -> Grant | None:
+        if kind not in ("access_token", "refresh_token"):
+            raise ValueError("Unknown token kind")
         for grant in self.grants():
             candidates = (
                 (grant.access_digest,)
@@ -86,8 +88,12 @@ class MemoryUnitOfWork:
     def prune(self, now: float, client_ttl: int) -> None:
         for group in ("codes", "pending", "grants"):
             self.data[group] = {k: v for k, v in self.data[group].items() if v.expires_at > now}
+        protected = {code.client_id for code in self.codes()}
+        protected.update(g.client_id for g in self.grants() if not g.revoked)
+        protected.update(p.parameters["client_id"] for p in self.pending())
         for client in self.clients():
-            if client.issued_at + client_ttl <= now:
+            last_used = client.last_used_at if client.last_used_at is not None else client.issued_at
+            if client.client_id not in protected and last_used + client_ttl <= now:
                 self.delete_client(client.client_id)
 
 
@@ -114,7 +120,7 @@ class MemoryStorage:
         """Trusted development fixture export, never bearer credentials."""
         with self._lock:
             return {
-                "schema": 1,
+                "schema": 2,
                 **{
                     g: {k: asdict(v) for k, v in records.items()}
                     for g, records in self._data.items()
@@ -124,7 +130,7 @@ class MemoryStorage:
     @classmethod
     def from_snapshot(cls, snapshot: Mapping[str, Any]) -> MemoryStorage:
         """Load trusted fixtures; not a production persistence adapter."""
-        if snapshot.get("schema") != 1:
+        if snapshot.get("schema") not in (1, 2):
             raise ValueError("Unsupported snapshot schema")
         result = cls()
         constructors = {

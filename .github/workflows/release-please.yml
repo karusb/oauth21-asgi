@@ -16,11 +16,13 @@ concurrency:
 jobs:
   checks:
     uses: ./.github/workflows/ci.yml
+    with:
+      build_distribution: false
   release:
     needs: checks
     if: github.ref == 'refs/heads/main' && inputs.release_tag == ''
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: write
       pull-requests: write
@@ -58,16 +60,28 @@ jobs:
           python -m build
           python -m twine check --strict dist/*
           python scripts/check_distribution.py dist
+          (cd dist && sha256sum *.whl *.tar.gz > SHA256SUMS)
           python -m venv "$RUNNER_TEMP/wheel-smoke"
           "$RUNNER_TEMP/wheel-smoke/bin/python" -m pip install --disable-pip-version-check dist/*.whl 'fastapi>=0.142.2,<1' 'itsdangerous>=2.2,<3' 'httpx2>=2.13.1,<3'
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/wheel-smoke/bin/python" "$GITHUB_WORKSPACE/scripts/wheel_smoke.py" "$GITHUB_WORKSPACE"
+      - name: Test exact tagged wheel over TCP, HTTPS and MCP
+        if: steps.release.outputs.release_created == 'true'
+        run: |
+          curl --fail --silent --show-error --location https://github.com/caddyserver/caddy/releases/download/v2.11.7/caddy_2.11.7_linux_amd64.tar.gz --output "$RUNNER_TEMP/caddy.tar.gz"
+          echo "727b91701a392de6ebc5027509f548bf39979e5216340d0faed8fa5e69c84f8b  $RUNNER_TEMP/caddy.tar.gz" | sha256sum --check
+          mkdir "$RUNNER_TEMP/caddy"
+          tar -xzf "$RUNNER_TEMP/caddy.tar.gz" -C "$RUNNER_TEMP/caddy"
+          export CADDY_BINARY="$RUNNER_TEMP/caddy/caddy"
+          python scripts/e2e.py dist/*.whl
+          python scripts/e2e.py dist/*.whl --https --mcp
       - name: Attach distributions to GitHub Release
         if: steps.release.outputs.release_created == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.release.outputs.tag_name }}
-        run: gh release upload "$RELEASE_TAG" dist/*.whl dist/*.tar.gz --clobber
+        # Release assets are immutable here. Never overwrite an already attached artifact.
+        run: gh release upload "$RELEASE_TAG" dist/*.whl dist/*.tar.gz dist/SHA256SUMS
   publish:
     needs: [checks, release]
     if: >-
@@ -101,8 +115,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release download "$RELEASE_TAG" --dir dist --pattern '*.whl' --pattern '*.tar.gz'
+          gh release download "$RELEASE_TAG" --dir dist --pattern '*.whl' --pattern '*.tar.gz' --pattern SHA256SUMS
+          (cd dist && sha256sum --check SHA256SUMS)
           python scripts/check_distribution.py dist
+          rm dist/SHA256SUMS
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
         with:

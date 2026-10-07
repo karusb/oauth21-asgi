@@ -197,7 +197,7 @@ def test_invalid_limits_paths_and_snapshots():
         with pytest.raises(ValueError):
             Paths(**kwargs)
     with pytest.raises(ValueError):
-        MemoryStorage.from_snapshot({"schema": 2})
+        MemoryStorage.from_snapshot({"schema": 999})
 
 
 def test_transport_origin_query_and_encoding(system):

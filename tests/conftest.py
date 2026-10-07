@@ -48,12 +48,23 @@ class FakeConsent:
 
 class System:
     def __init__(
-        self, *, limits=None, storage=None, issuer=ISSUER, paths=None, hook=None, policy=None
+        self,
+        *,
+        limits=None,
+        storage=None,
+        issuer=ISSUER,
+        paths=None,
+        hook=None,
+        policy=None,
+        client_mode=None,
+        cimd=None,
     ):
         self.now = 2_000_000_000.0
         self.identity = FakeIdentity()
         self.storage = storage or MemoryStorage()
         options = {} if paths is None else {"paths": paths}
+        if client_mode is not None:
+            options.update(client_mode=client_mode, cimd=cimd)
         self.oauth = AuthorizationServer(
             issuer=issuer,
             scopes={"read", "write"},
