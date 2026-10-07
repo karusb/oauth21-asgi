@@ -145,6 +145,20 @@ def test_built_in_transport_bounds_and_never_follows_redirects():
                 return web.Response(status=302, headers={"Location": "/target"})
             if name == "encoding":
                 return web.Response(body=b"compressed", headers={"Content-Encoding": "gzip"})
+            if name == "duplicate-type":
+                return web.Response(
+                    body=b"{}",
+                    headers=[("Content-Type", "application/json"), ("Content-Type", "text/html")],
+                )
+            if name == "duplicate-cache":
+                return web.Response(
+                    body=b"{}",
+                    headers=[
+                        ("Content-Type", "application/json"),
+                        ("Cache-Control", "no-store"),
+                        ("Cache-Control", "max-age=3600"),
+                    ],
+                )
             if name == "chunked":
                 reply = web.StreamResponse()
                 await reply.prepare(request)
@@ -163,12 +177,17 @@ def test_built_in_transport_bounds_and_never_follows_redirects():
         await web.SockSite(runner, listener).start()
         try:
             fetcher = AiohttpMetadataFetcher(MetadataNetworkPolicy(allow_loopback=True))
-            for path in ("redirect", "encoding", "chunked", "large"):
+            for path in ("redirect", "encoding", "chunked", "large", "duplicate-type"):
                 with pytest.raises(MetadataFetchError):
                     await fetcher.fetch(
                         f"http://127.0.0.1:{port}/{path}", max_bytes=1024, timeout=2
                     )
             assert not followed
+            response = await fetcher.fetch(
+                f"http://127.0.0.1:{port}/duplicate-cache", max_bytes=1024, timeout=2
+            )
+            config = ClientMetadataDocuments(fetcher=fetcher)
+            assert config._ttl(response.headers) == 0
         finally:
             await runner.cleanup()
 
@@ -183,3 +202,17 @@ def test_default_transport_and_tls_policy():
     insecure.verify_mode = ssl.CERT_NONE
     with pytest.raises(ValueError):
         AiohttpMetadataFetcher(MetadataNetworkPolicy(), ssl_context=insecure)
+
+
+def test_changed_tls_context_cannot_disable_verification(monkeypatch):
+    context = ssl.create_default_context()
+    fetcher = AiohttpMetadataFetcher(MetadataNetworkPolicy(), ssl_context=context)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+
+    async def no_resolution(*args, **kwargs):
+        raise AssertionError("Invalid TLS configuration must not reach DNS")
+
+    monkeypatch.setattr(ThreadedResolver, "resolve", no_resolution)
+    with pytest.raises(MetadataFetchError, match="TLS policy"):
+        asyncio.run(fetcher.fetch("https://client.test/client.json", max_bytes=1024, timeout=1))

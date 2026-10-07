@@ -49,6 +49,8 @@ class AiohttpMetadataFetcher:
         self.ssl_context = ssl_context or ssl.create_default_context()
 
     async def fetch(self, client_id: str, *, max_bytes: int, timeout: float) -> MetadataResponse:
+        if not self.ssl_context.check_hostname or self.ssl_context.verify_mode != ssl.CERT_REQUIRED:
+            raise MetadataFetchError("CIMD TLS policy requires certificate and hostname validation")
         self.policy.check_url(client_id)
         resolver = VettedResolver(self.policy)
         connector = aiohttp.TCPConnector(
@@ -70,6 +72,10 @@ class AiohttpMetadataFetcher:
                     headers={"Accept": "application/json", "Accept-Encoding": "identity"},
                 ) as reply:
                     headers = {key.lower(): value for key, value in reply.headers.items()}
+                    for name in ("content-type", "content-encoding", "age"):
+                        if len(reply.headers.getall(name, [])) > 1:
+                            raise MetadataFetchError("Ambiguous metadata response headers")
+                    headers["cache-control"] = ",".join(reply.headers.getall("cache-control", []))
                     if (
                         reply.status != 200
                         or headers.get("content-encoding", "identity") != "identity"

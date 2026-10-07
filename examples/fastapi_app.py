@@ -104,7 +104,8 @@ def create_app(
     async def complete_login(request: Request):
         form = await request.form()
         csrf = request.session.pop("login_csrf", "")
-        if not csrf or not secrets.compare_digest(str(form.get("csrf", "")), csrf):
+        submitted = str(form.get("csrf", ""))
+        if not csrf or not submitted.isascii() or not secrets.compare_digest(submitted, csrf):
             return HTMLResponse("Invalid login request", status_code=400)
         request.session["subject"] = identity.subject.subject_id
         return RedirectResponse(request.session.pop("return_to", "/"), status_code=303)

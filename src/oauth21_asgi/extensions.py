@@ -66,6 +66,7 @@ class ResourceBinding:
 
     def authorization(self, grant: GrantHooks, redirect_uri: str) -> None:
         self.resource(grant.request)
+        grant.server.validate_requested_scope(grant.request.scope)
         if any(len(v) != 1 for v in grant.request.payload.datalist.values()):
             raise InvalidRequestError("Repeated authorization parameters are not supported.")
 

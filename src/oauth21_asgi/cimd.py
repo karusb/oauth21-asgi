@@ -155,6 +155,8 @@ class CIMDLimits:
             )
             or type(self.min_ttl) is not int
             or self.min_ttl < 0
+            or type(self.default_ttl) is not int
+            or type(self.timeout) not in (int, float)
         ):
             raise ValueError("Invalid CIMD limits")
         if not self.min_ttl <= self.default_ttl <= self.max_ttl or not 0 < self.timeout <= 60:
@@ -282,17 +284,26 @@ class ClientMetadataDocuments:
                 self._pending.pop(client_id, None)
 
     def _ttl(self, headers: Mapping[str, str]) -> int:
-        directives = {part.strip().lower() for part in headers.get("cache-control", "").split(",")}
-        if directives.intersection({"no-store", "no-cache"}):
+        directives = [part.strip().lower() for part in headers.get("cache-control", "").split(",")]
+        names = [part.partition("=")[0].strip() for part in directives]
+        if any(name in ("no-store", "no-cache") for name in names):
             return 0
-        age = headers.get("age", "0")
-        max_age = next(
-            (part[8:].strip('"') for part in directives if part.startswith("max-age=")), None
-        )
-        if max_age is not None and max_age.isdecimal() and age.isdecimal():
-            ttl = max(0, int(max_age) - int(age))
-        else:
+        values = [
+            part.partition("=")[2].strip().strip('"')
+            for part, name in zip(directives, names, strict=True)
+            if name == "max-age"
+        ]
+        if not values:
             ttl = self.limits.default_ttl
+        else:
+            age = headers.get("age", "0").strip()
+            if (
+                len(values) != 1
+                or not re.fullmatch(r"[0-9]{1,10}", values[0])
+                or not re.fullmatch(r"[0-9]{1,10}", age)
+            ):
+                return 0  # Conflicting or invalid freshness cannot extend reuse.
+            ttl = max(0, int(values[0]) - int(age))
         return min(self.limits.max_ttl, max(self.limits.min_ttl, ttl))
 
 

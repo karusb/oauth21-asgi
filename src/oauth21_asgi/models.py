@@ -157,6 +157,7 @@ class Limits:
     access_ttl: int = 900
     grant_ttl: int = 30 * 24 * 3600
     client_ttl: int = 90 * 24 * 3600
+    body_timeout: int = 10
 
     def __post_init__(self) -> None:
         if any(type(v) is not int or v < 1 for v in vars(self).values()):
