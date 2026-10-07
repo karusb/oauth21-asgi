@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json
+import asyncio
 import logging
 import secrets
 import time
@@ -18,7 +18,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route
 
-from .cimd import ClientMetadataDocuments
+from .cimd import ClientMetadataDocuments, strict_object
 from .engine import Engine
 from .extensions import current_subject
 from .http import FormRequest, OAuthResponse, RegistrationRequest, response
@@ -145,6 +145,8 @@ class AuthorizationServer:
         app.router.routes.extend(routes)
 
     def check_transport(self, request: Request) -> None:
+        if len(request.scope.get("query_string", b"")) > self.limits.query_bytes:
+            raise InvalidRequestError("Query too large.", status_code=413)
         parts = urlsplit(str(request.url))
         if urlunsplit((parts.scheme, parts.netloc, "", "", "")) != self.origin:
             raise InvalidRequestError("Request origin does not match the configured issuer.")
@@ -157,17 +159,19 @@ class AuthorizationServer:
             "code",
         }.intersection(request.query_params):
             raise InvalidRequestError("Credentials must not appear in the request URL.")
-        if len(request.scope.get("query_string", b"")) > self.limits.query_bytes:
-            raise InvalidRequestError("Query too large.", status_code=413)
 
     async def body(self, request: Request) -> bytes:
         parts: list[bytes] = []
         length = 0
-        async for part in request.stream():
-            length += len(part)
-            if length > self.limits.body_bytes:
-                raise InvalidRequestError("Body too large.", status_code=413)
-            parts.append(part)
+        try:
+            async with asyncio.timeout(self.limits.body_timeout):
+                async for part in request.stream():
+                    length += len(part)
+                    if length > self.limits.body_bytes:
+                        raise InvalidRequestError("Body too large.", status_code=413)
+                    parts.append(part)
+        except TimeoutError as error:
+            raise InvalidRequestError("Request body timed out.", status_code=408) from error
         return b"".join(parts)
 
     async def form(self, request: Request) -> tuple[Request, list[tuple[str, str]]]:
@@ -235,6 +239,8 @@ class AuthorizationServer:
             return response(200, dict(self.metadata), [])
         except OAuth2Error as error:
             return self.error(error)
+        except Exception as error:
+            return self.unavailable("discovery", error)
 
     async def register(self, request: Request) -> Response:
         try:
@@ -248,18 +254,8 @@ class AuthorizationServer:
                 raise InvalidRequestError("Use application/json.", status_code=415)
             raw = await self.body(request)
 
-            def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-                result: dict[str, Any] = {}
-                for key, value in pairs:
-                    if key in result:
-                        raise ValueError("Repeated JSON member")
-                    result[key] = value
-                return result
-
             try:
-                data = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_object)
-                if not isinstance(data, dict):
-                    raise ValueError("Object required")
+                data = strict_object(raw)
             except (UnicodeDecodeError, ValueError, RecursionError) as error:
                 raise InvalidRequestError("A valid JSON object is required.") from error
             if self.registration_hook:
@@ -342,6 +338,9 @@ class AuthorizationServer:
                 raise InvalidRequestError("An active subject is required.")
             context = self.context(grant, subject)
             consent_token = secrets.token_urlsafe(32)
+            parameters = dict(adapted.payload.data)
+            # Bind the ticket to what was rendered, not mutable client defaults.
+            parameters.update(redirect_uri=context.redirect_uri, scope=" ".join(context.scopes))
 
             def save() -> None:
                 current_subject(self.identity, subject)
@@ -352,7 +351,7 @@ class AuthorizationServer:
                     PendingConsent(
                         digest(consent_token),
                         subject,
-                        dict(adapted.payload.data),
+                        parameters,
                         self.clock() + self.limits.consent_ttl,
                     )
                 )
@@ -371,7 +370,8 @@ class AuthorizationServer:
             )
             result.headers["Cache-Control"] = "no-store"
             result.headers["Referrer-Policy"] = "no-referrer"
-            result.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
+            # Multiple enforced policies intersect; never discard the host's CSP.
+            result.headers.append("Content-Security-Policy", "frame-ancestors 'none'")
             return result
         except OAuth2Error as error:
             return self.error(error, callback=True)
@@ -389,6 +389,10 @@ class AuthorizationServer:
         if (
             not token
             or not cookie
+            or len(token) != 43
+            or len(cookie) != 43
+            or not token.isascii()
+            or not cookie.isascii()
             or not secrets.compare_digest(token, cookie)
             or (origin is not None and origin != self.origin)
             or request.headers.get("sec-fetch-site") == "cross-site"
@@ -402,6 +406,8 @@ class AuthorizationServer:
             pending = self.engine.uow.get().get_pending(digest(token))
             if not pending or pending.expires_at <= self.clock() or pending.subject != subject:
                 raise InvalidRequestError("Consent expired or subject changed.")
+            if not pending.parameters.get("scope") or not pending.parameters.get("redirect_uri"):
+                raise InvalidRequestError("Restart authorization to confirm explicit consent.")
             return dict(pending.parameters)
 
         parameters = await self.invoke(saved_parameters)
@@ -479,6 +485,7 @@ class AuthorizationServer:
             if (
                 not grant
                 or grant.revoked
+                or grant.client_source not in ("dcr", "cimd")
                 or grant.resource != resource
                 or grant.access_expires_at <= self.clock()
                 or grant.expires_at <= self.clock()
@@ -486,6 +493,10 @@ class AuthorizationServer:
                 or not set(grant.scope.split()).issubset(self.metadata["scopes_supported"])
                 or (self.client_mode == ClientMode.CIMD_ONLY and grant.client_source != "cimd")
                 or (self.client_mode == ClientMode.DCR_ONLY and grant.client_source != "dcr")
+                or (
+                    grant.client_source == "dcr"
+                    and self.engine.query_client(grant.client_id) is None
+                )
             ):
                 return None
             try:

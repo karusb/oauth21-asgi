@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import os
 import subprocess
@@ -95,3 +96,47 @@ def test_mismatched_release_tag_is_rejected(tmp_path):
     result = check_distributions(tmp_path, tag="v999.0.0")
     assert result.returncode != 0
     assert "Release tag does not match" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        None,
+        "tamper",
+        "missing-entry",
+        "duplicate",
+        "traversal",
+        "unknown-file",
+        "extra-file",
+        "oversized",
+    ],
+)
+def test_release_manifest_requires_every_exact_artifact(tmp_path, mutation):
+    wheel, sdist = tmp_path / "package.whl", tmp_path / "package.tar.gz"
+    wheel.write_bytes(b"wheel-fixture")
+    sdist.write_bytes(b"sdist-fixture")
+    lines = [
+        f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}" for path in (wheel, sdist)
+    ]
+    if mutation == "tamper":
+        wheel.write_bytes(b"changed-wheel")
+    elif mutation == "missing-entry":
+        lines.pop(0)
+    elif mutation == "duplicate":
+        lines.append(lines[0])
+    elif mutation == "traversal":
+        lines[0] = lines[0].replace("package.whl", "../package.whl")
+    elif mutation == "unknown-file":
+        lines[0] = lines[0].replace("package.whl", "other.whl")
+    elif mutation == "extra-file":
+        (tmp_path / "other.whl").write_bytes(b"unexpected")
+    elif mutation == "oversized":
+        lines.append("x" * 16_385)
+    (tmp_path / "SHA256SUMS").write_text("\n".join(lines) + "\n", encoding="ascii")
+    result = subprocess.run(  # noqa: S603 -- fixed repository validator, no shell
+        [sys.executable, str(ROOT / "scripts/verify_release_artifacts.py"), str(tmp_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert (result.returncode == 0) == (mutation is None), result.stderr

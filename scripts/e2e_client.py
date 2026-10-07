@@ -54,6 +54,8 @@ def flow(client_id):
     first = http.get("/oauth/authorize", params=params)
     if first.status_code == 303:
         login = http.get("/login")
+        assert http.post("/login", data={"csrf": "\u00e9"}).status_code == 400
+        login = http.get("/login")
         csrf = login.text.split('name="csrf" value="')[1].split('"')[0]
         assert http.post("/login", data={"csrf": csrf}).status_code == 303
         first = http.get("/oauth/authorize", params=params)

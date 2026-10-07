@@ -58,6 +58,7 @@ class System:
         policy=None,
         client_mode=None,
         cimd=None,
+        scopes=None,
     ):
         self.now = 2_000_000_000.0
         self.identity = FakeIdentity()
@@ -67,7 +68,7 @@ class System:
             options.update(client_mode=client_mode, cimd=cimd)
         self.oauth = AuthorizationServer(
             issuer=issuer,
-            scopes={"read", "write"},
+            scopes={"read", "write"} if scopes is None else scopes,
             resources={A, B},
             storage=self.storage,
             identity=self.identity,

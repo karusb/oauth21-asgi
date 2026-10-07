@@ -14,6 +14,10 @@ Include the affected version, a minimal reproduction using synthetic credentials
 
 Hosts own login/session security, explicit consent UX, durable transactional storage, account authorization, Resource Server challenges and rate controls. Never deploy MemoryStorage or the demonstration login as production authentication. Account incarnation/version checks must use fresh authoritative state and coordinate with account changes.
 
+Consent tickets bind the exact resolved scopes and redirect displayed to the user; changing client defaults cannot expand an existing consent. Legacy tickets missing those resolved values require a fresh authorization. Request query limits apply before parsing; JSON rejects duplicate fields and non-JSON numbers. `Limits.body_timeout` bounds total body-read time (10 seconds by default), alongside the byte limit. Hosts still need connection, header, endpoint rate and backend transaction limits.
+
+Consent responses preserve the host's Content Security Policy and append a separate enforced `frame-ancestors 'none'` policy. Browser enforcement intersects these policies, retaining host script/form restrictions while blocking framing. Hosts must still escape untrusted client metadata.
+
 Configure HTTPS and trusted proxy scope correctly. Redact callback code/state, bodies and Authorization headers from infrastructure logs. The package suppresses Authlib 1.8 token-bearing grant DEBUG records with standard logging filters; this process-wide filter also affects other Authlib servers using those loggers. Review upstream logging when upgrading.
 
 Storage outages fail closed with generic 503 responses. Keep telemetry free of credentials. The supported profile has no client secrets, passwords, JWT signing keys, remote branding fetches or token introspection.

@@ -18,7 +18,7 @@ Storage.transaction() yields UnitOfWork. Synchronous Authlib work runs in a work
 
 ## Records and operations
 
-Client: exact redirects, scopes/grants, name, ID/issued time, optional `last_used_at` and `metadata_origin`. Code: digest, subject/version, client/source/redirect/resource/scope/challenge/expiry. PendingConsent: ticket digest, subject/version, original authorization parameters/expiry. Grant: family ID, subject/version, client/source/resource/narrowed scope, original/absolute/access times, current access/refresh digests, used-refresh tuple, revoked flag. `client_source` is `dcr` or `cimd`; source mismatches must not validate credentials. CIMD Client objects are request-local/cache records, never persistent registrations.
+Client: exact redirects, scopes/grants, name, ID/issued time, optional `last_used_at` and `metadata_origin`. Code: digest, subject/version, client/source/redirect/resource/scope/challenge/expiry. PendingConsent: ticket digest, subject/version, authorization parameters with explicit resolved scope/redirect and expiry. Grant: family ID, subject/version, client/source/resource/narrowed scope, original/absolute/access times, current access/refresh digests, used-refresh tuple, revoked flag. `client_source` is `dcr` or `cimd`; source mismatches must not validate credentials. CIMD Client objects are request-local/cache records, never persistent registrations. Access validation rejects unknown sources and missing DCR registrations even if an adapter accidentally leaves an orphaned grant.
 
 `find_token()` accepts only `access_token` and `refresh_token` (`TokenKind`). Unknown kinds must raise rather than silently selecting refresh lookup. Authlib's revocation endpoint handles valid hint fallback using these two explicit kinds.
 
@@ -31,6 +31,8 @@ UnitOfWork exposes explicit get/put/delete/list methods, token-digest lookup and
 snapshot/from_snapshot are trusted fixture export/reload, not an import API or durable database. Never load untrusted snapshots. Tests verify digest secrecy, reload, pruning, concurrent code/refresh operations and commit failures for registration/consent/code issuance/exchange/refresh.
 
 Snapshots now write schema 2 and accept schemas 1 and 2. Old clients default `last_used_at=None` and `metadata_origin=None`; old codes/grants default source `dcr`. Other schema versions fail explicitly. Production adapters must make an equivalent migration when adopting the new record fields. Switching modes changes acceptance, not destructive storage migration; regular expiry and explicit administration still apply.
+
+Pending consent without an explicit resolved scope or redirect is rejected at confirmation. Users must restart authorization for such legacy tickets; defaults must never be recomputed from changed client metadata after consent was displayed.
 
 Do not perform unbounded network work in a storage lock. Identity's authoritative lookup is synchronous. Render/decision callbacks are outside transactions; completion revalidates the pending consent and current subject before issuing a code. Host login/identity can share the same durable account transaction strategy for stronger account-write coordination.
 

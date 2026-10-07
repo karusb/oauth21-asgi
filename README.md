@@ -179,7 +179,7 @@ MCP hosts can use this package as their Authorization Server while the official 
 
 ## Configuration and security
 
-`Limits` configures body/query sizes, client/code/consent/family capacities, refresh rotation bounds and TTLs. `Paths` configures all endpoint routes. Issuers with path components use RFC 8414 discovery path insertion. Route collisions fail explicitly. `oauth.engine` exposes the real Authlib server for supported public extensions.
+`Limits` configures body/query sizes, the total body-read deadline (`body_timeout`, default 10 seconds), client/code/consent/family capacities, refresh rotation bounds and TTLs. `Paths` configures all endpoint routes. Issuers with path components use RFC 8414 discovery path insertion. Route collisions fail explicitly. `oauth.engine` exposes the real Authlib server for supported public extensions.
 
 `ExactRedirectPolicy` requires safe HTTPS and exact membership. `CallableRedirectPolicy` checks URI safety before applying your predicate. Loopback callbacks require explicit opt-in. Only CIMD-enabled modes fetch metadata; branding and JWKS URLs are never fetched.
 
@@ -210,7 +210,6 @@ CI runs all supported interpreters and checks the wheel installed outside the so
 | [Architecture](https://github.com/karusb/oauth21-asgi/blob/main/docs/architecture.md) | Understand the Authlib integration and host boundaries |
 | [Storage contract](https://github.com/karusb/oauth21-asgi/blob/main/docs/storage.md) | Implement a production storage adapter |
 | [CIMD](https://github.com/karusb/oauth21-asgi/blob/main/docs/cimd.md) | Configure metadata resolution, caching and network protection |
-| [Engineering audit](https://github.com/karusb/oauth21-asgi/blob/main/docs/audit.md) | Review findings, validation and remaining acceptance work |
 | [Security](https://github.com/karusb/oauth21-asgi/blob/main/SECURITY.md) | Review security expectations and report vulnerabilities |
 | [Contributing](https://github.com/karusb/oauth21-asgi/blob/main/CONTRIBUTING.md) | Develop, contribute and publish releases |
 
