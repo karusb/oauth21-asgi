@@ -8,6 +8,19 @@ python -m pip install -e '.[dev,example]'
 
 Run the development checks listed in README.md. CI tests Python 3.11–3.14, branch coverage of at least 90%, formatting, lint, source typing, dependency/security checks and distribution installation.
 
+The `Trivy security gate` job runs on pull requests, manual/weekly CI and release checks. It uses checksum-pinned Trivy 0.75.0 and a freshly updated vulnerability database. It scans resolved runtime, optional and development Python dependencies, plus repository secrets and supported misconfigurations. HIGH or CRITICAL findings fail CI, including vulnerabilities without a published fix; scanner/database failures also fail the job. Existing Bandit and pip-audit checks remain in place. Configure this job as a required branch check if merges must be blocked.
+
+To reproduce with Trivy 0.75.0 installed, run from a development environment:
+
+```sh
+mkdir -p artifacts/security-scan
+python -m pip freeze --exclude oauth21-asgi > artifacts/security-scan/requirements.txt
+trivy fs --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --ignorefile /dev/null artifacts/security-scan/requirements.txt
+trivy fs --scanners secret,misconfig --severity HIGH,CRITICAL --exit-code 1 --ignorefile /dev/null --skip-dirs .git --skip-dirs .tools --skip-dirs artifacts --skip-dirs '.venv*' --skip-dirs dist --skip-dirs build .
+```
+
+These commands use POSIX shell syntax; on Windows, pass an empty existing file to `--ignorefile` instead of `/dev/null`. Keep local reports under ignored `artifacts/security-scan/`. Trivy is a known-vulnerability/secret/configuration check, not a substitute for protocol review or deployment testing.
+
 Protocol/security changes need public HTTP/API regression tests, negative cases and storage rollback/concurrency coverage where applicable. Explain ownership changes in docs/architecture.md. Actual Authlib grants/endpoints must execute; test spies must delegate to real methods. Runtime forks, private patches and monkeypatches are prohibited.
 
 Use Conventional Commits: feat/fix/perf/docs/ci and BREAKING CHANGE or ! for API changes. `_version.py` is the authoritative runtime/build version. Release Please updates it and CHANGELOG.md; its manifest records release history. Review the release PR before merging.

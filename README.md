@@ -23,6 +23,12 @@ Add an Authorization Server for public clients with mandatory PKCE S256, optiona
 
 **Scope:** a focused public-client profile, without OIDC, JWT access tokens, confidential clients, password grants, social login or token introspection. CIMD targets Internet-Draft `-02`, not a final RFC. No OAuth, MCP or ChatGPT certification is claimed.
 
+## IETF standards
+
+The public-client profile implements Authorization Code and refresh flows from **RFC 6749**, bearer-token issuance from **RFC 6750**, **PKCE S256 (RFC 7636)**, **revocation (RFC 7009)**, **Dynamic Client Registration (RFC 7591)** when enabled, **Authorization Server Metadata (RFC 8414)**, **resource indicators (RFC 8707)** and **authorization-response issuer identification (RFC 9207)**. Security controls follow relevant **RFC 9700** guidance.
+
+Support is scoped: some features are intentionally excluded, registration defaults differ from RFC 7591, and resource-server HTTP handling belongs to your host. OAuth 2.1 and CIMD are draft references, not blanket compliance claims. See [Standards coverage and implementation gaps](docs/standards.md) for specification links, supported behavior and missing parts.
+
 ## Quick start
 
 **Requires Python 3.11–3.14.** Install with FastAPI support:
@@ -207,6 +213,7 @@ CI runs all supported interpreters and checks the wheel installed outside the so
 
 | Guide | When to read it |
 | --- | --- |
+| [Standards coverage](docs/standards.md) | Check implemented IETF specifications, profile restrictions and gaps |
 | [Architecture](https://github.com/karusb/oauth21-asgi/blob/main/docs/architecture.md) | Understand the Authlib integration and host boundaries |
 | [Storage contract](https://github.com/karusb/oauth21-asgi/blob/main/docs/storage.md) | Implement a production storage adapter |
 | [CIMD](https://github.com/karusb/oauth21-asgi/blob/main/docs/cimd.md) | Configure metadata resolution, caching and network protection |
