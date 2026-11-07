@@ -1,6 +1,6 @@
 # IETF standards coverage
 
-This guide describes the shipped public-client profile, reviewed on **2026-10-08**. Authlib supplies protocol machinery; this package enables specific grants and extensions and adds ASGI, host and storage integration. An RFC appearing in Authlib does not mean this library enables all of it. Coverage below is an implementation assessment, not certification or an exhaustive requirement-by-requirement conformance report.
+This guide describes the shipped public-client profile, reviewed on **2026-11-07**. Authlib supplies protocol machinery; this package enables specific grants and extensions and adds ASGI, host and storage integration. An RFC appearing in Authlib does not mean this library enables all of it. Coverage below is an implementation assessment, not certification or an exhaustive requirement-by-requirement conformance report.
 
 ## Implemented RFC behavior
 

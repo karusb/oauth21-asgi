@@ -92,7 +92,7 @@ def run():
         shutil.copyfile(root / "examples/fastapi_app.py", folder / "fastapi_app.py")
         subprocess.run([sys.executable, "-m", "venv", str(folder / "venv")], check=True)  # noqa: S603 -- fixed local interpreter, no shell
         python = folder / "venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-        dependencies = [str(wheel) + "[example,cimd]", "httpx2>=2.13.1,<3"]
+        dependencies = [str(wheel) + "[example,cimd]", "httpx2>=2.16,<3"]
         if options.mcp:
             dependencies.append("mcp==2.3.0")
         subprocess.run(  # noqa: S603 -- fixed interpreter and dependencies

@@ -27,10 +27,10 @@ T = TypeVar("T")
 
 
 class NoCredentialDebug(logging.Filter):
-    """Authlib 1.8 grant DEBUG messages contain complete issued token dictionaries."""
+    """Authlib grant DEBUG messages contain complete issued token dictionaries."""
 
     def filter(self, record: logging.LogRecord) -> bool:
-        # Only the verified Authlib 1.8 token-dictionary event is suppressed.
+        # Only the verified Authlib token-dictionary event is suppressed.
         # Do not format the record: formatting would itself expose credentials.
         return record.msg != "Issue token %r to %r"
 

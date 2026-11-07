@@ -30,7 +30,7 @@ UnitOfWork exposes explicit get/put/delete/list methods, token-digest lookup and
 
 snapshot/from_snapshot are trusted fixture export/reload, not an import API or durable database. Never load untrusted snapshots. Tests verify digest secrecy, reload, pruning, concurrent code/refresh operations and commit failures for registration/consent/code issuance/exchange/refresh.
 
-Snapshots now write schema 2 and accept schemas 1 and 2. Old clients default `last_used_at=None` and `metadata_origin=None`; old codes/grants default source `dcr`. Other schema versions fail explicitly. Production adapters must make an equivalent migration when adopting the new record fields. Switching modes changes acceptance, not destructive storage migration; regular expiry and explicit administration still apply.
+Snapshots write schema 2 and accept schemas 1 and 2. Old clients default `last_used_at=None` and `metadata_origin=None`; old codes/grants default source `dcr`. Other schema versions fail explicitly. Production adapters must make an equivalent migration when adopting the new record fields. Switching modes changes acceptance, not destructive storage migration; regular expiry and explicit administration still apply.
 
 Pending consent without an explicit resolved scope or redirect is rejected at confirmation. Users must restart authorization for such legacy tickets; defaults must never be recomputed from changed client metadata after consent was displayed.
 

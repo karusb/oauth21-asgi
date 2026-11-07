@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Security fixes target the latest release. Use Authlib >=1.8.0 and patched framework dependencies. CI checks Python 3.11–3.14 and audits dependencies. This project has not undergone an independent security audit.
+Security fixes target the latest release. Use Authlib >=1.9.5 and patched framework dependencies. CI checks Python 3.11–3.14 and audits dependencies. This project has not undergone an independent security audit.
 
 ## Reporting a vulnerability
 
@@ -18,7 +18,7 @@ Consent tickets bind the exact resolved scopes and redirect displayed to the use
 
 Consent responses preserve the host's Content Security Policy and append a separate enforced `frame-ancestors 'none'` policy. Browser enforcement intersects these policies, retaining host script/form restrictions while blocking framing. Hosts must still escape untrusted client metadata.
 
-Configure HTTPS and trusted proxy scope correctly. Redact callback code/state, bodies and Authorization headers from infrastructure logs. The package suppresses Authlib 1.8 token-bearing grant DEBUG records with standard logging filters; this process-wide filter also affects other Authlib servers using those loggers. Review upstream logging when upgrading.
+Configure HTTPS and trusted proxy scope correctly. Redact callback code/state, bodies and Authorization headers from infrastructure logs. Review upstream logging on dependency upgrades; the narrow Authlib filter is described below.
 
 Storage outages fail closed with generic 503 responses. Keep telemetry free of credentials. The supported profile has no client secrets, passwords, JWT signing keys, remote branding fetches or token introspection.
 
@@ -34,4 +34,4 @@ Loopback metadata is allowed only by explicit development policy with an explici
 
 Unexpected endpoint failures emit only a fixed event plus endpoint, operation, exception class and locally generated incident ID; clients receive generic 503 and the incident ID. No traceback, exception message, request URL/body, cookies or callback parameters are logged by this diagnostic path. Expected OAuth errors do not produce exception logs. Transport diagnostics likewise omit URLs and exception text.
 
-The standard Authlib logging filter suppresses only its exact issued-token-dictionary event (`Issue token %r to %r`), preserving unrelated INFO/DEBUG records. This narrow filter still applies process-wide to those Authlib grant loggers. Review upstream logging on upgrades and redact host/proxy logs independently. This repository's engineering review and local compatibility fixtures are not an independent security audit or hosted ChatGPT acceptance.
+The standard Authlib logging filter suppresses only its exact issued-token-dictionary event (`Issue token %r to %r`), preserving unrelated INFO/DEBUG records. This narrow filter still applies process-wide to those Authlib grant loggers. Review upstream logging on upgrades and redact host/proxy logs independently. Local compatibility fixtures are not an independent security audit or hosted-client certification.

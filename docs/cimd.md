@@ -1,6 +1,6 @@
 # Client ID Metadata Documents
 
-CIMD lets a public client use its HTTPS metadata document URL as its client ID without registration. This implementation targets [draft-ietf-oauth-client-id-metadata-document-02](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-client-id-metadata-document-02), reviewed alongside [MCP authorization](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization) and [OpenAI OAuth documentation](https://developers.openai.com/plugins/build/auth). The draft can change; this is a deliberately restricted public-client profile, not final RFC compliance.
+CIMD lets a public client use its HTTPS metadata document URL as its client ID without registration. This implementation targets [draft-ietf-oauth-client-id-metadata-document-02](https://www.ietf.org/archive/id/draft-ietf-oauth-client-id-metadata-document-02.html). This is a pinned draft profile, not a promise of support for every later draft or final RFC. See [standards coverage](standards.md) for supported behavior and gaps.
 
 ## Configuration
 

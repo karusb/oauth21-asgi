@@ -26,13 +26,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.14'
-      - name: Install checksum-pinned Trivy 0.75.0
+      - name: Install checksum-pinned Trivy 0.76.2
         run: |
-          curl --fail --silent --show-error --location --retry 3 https://github.com/aquasecurity/trivy/releases/download/v0.75.0/trivy_0.75.0_Linux-64bit.tar.gz --output "$RUNNER_TEMP/trivy.tar.gz"
-          echo "c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f  $RUNNER_TEMP/trivy.tar.gz" | sha256sum --check
+          curl --fail --silent --show-error --location --retry 3 https://github.com/aquasecurity/trivy/releases/download/v0.76.2/trivy_0.76.2_Linux-64bit.tar.gz --output "$RUNNER_TEMP/trivy.tar.gz"
+          echo "bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf  $RUNNER_TEMP/trivy.tar.gz" | sha256sum --check
           mkdir "$RUNNER_TEMP/trivy"
           tar -xzf "$RUNNER_TEMP/trivy.tar.gz" -C "$RUNNER_TEMP/trivy" trivy
           echo "$RUNNER_TEMP/trivy" >> "$GITHUB_PATH"
@@ -62,12 +62,12 @@ jobs:
         python: ['3.11', '3.12', '3.13', '3.14']
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python }}
           cache: pip
           cache-dependency-path: pyproject.toml
-      - run: python -m pip install --disable-pip-version-check -e '.[fastapi,cimd]' 'pytest>=8.4,<10' 'pytest-cov>=7,<8' 'httpx2>=2.13.1,<3'
+      - run: python -m pip install --disable-pip-version-check -e '.[fastapi,cimd]' 'pytest>=9.2,<10' 'pytest-cov>=7.1,<8' 'httpx2>=2.16,<3'
       - run: python -m pip check
       - run: python -m pytest --cov --cov-report=term-missing
   quality:
@@ -75,7 +75,7 @@ jobs:
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.14'
       - run: python -m pip install -e '.[dev,example]'
@@ -85,6 +85,7 @@ jobs:
           python -m mypy src
           python -m bandit -q -r src
           python -m pip_audit
+          python scripts/check_docs.py
   dependencies:
     runs-on: ubuntu-latest
     timeout-minutes: 12
@@ -94,13 +95,13 @@ jobs:
         profile: [minimum, latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.11'
       - if: matrix.profile == 'minimum'
-        run: python -m pip install -e '.[fastapi,cimd]' 'Authlib==1.8.0' 'starlette==1.7.0' 'fastapi==0.142.2' 'python-multipart==0.0.32' 'aiohttp==3.14.4' 'pytest>=8.4,<10' 'pytest-cov>=7,<8' 'httpx2>=2.13.1,<3'
+        run: python -m pip install -e '.[fastapi,cimd]' 'Authlib==1.9.5' 'joserfc==1.7.6' 'starlette==1.10.0' 'fastapi==0.162.2' 'python-multipart==0.0.33' 'aiohttp==3.14.5' 'pytest>=9.2,<10' 'pytest-cov>=7.1,<8' 'httpx2>=2.16,<3'
       - if: matrix.profile == 'latest'
-        run: python -m pip install --upgrade -e '.[fastapi,cimd]' 'pytest>=8.4,<10' 'pytest-cov>=7,<8' 'httpx2>=2.13.1,<3'
+        run: python -m pip install --upgrade -e '.[fastapi,cimd]' 'pytest>=9.2,<10' 'pytest-cov>=7.1,<8' 'httpx2>=2.16,<3'
       - run: python -m pip check
       - run: python -m pytest --cov --cov-report=term-missing
   distribution:
@@ -109,7 +110,7 @@ jobs:
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.14'
       - run: python -m pip install -e '.[dev,example]'
@@ -119,7 +120,7 @@ jobs:
           python -m twine check --strict dist/*
           python scripts/check_distribution.py dist
           python -m venv "$RUNNER_TEMP/wheel-smoke"
-          "$RUNNER_TEMP/wheel-smoke/bin/python" -m pip install --disable-pip-version-check dist/*.whl 'fastapi>=0.142.2,<1' 'itsdangerous>=2.2,<3' 'httpx2>=2.13.1,<3'
+          "$RUNNER_TEMP/wheel-smoke/bin/python" -m pip install --disable-pip-version-check dist/*.whl 'fastapi>=0.162.2,<1' 'itsdangerous>=2.2,<3' 'httpx2>=2.16,<3'
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/wheel-smoke/bin/python" "$GITHUB_WORKSPACE/scripts/wheel_smoke.py" "$GITHUB_WORKSPACE"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -138,7 +139,7 @@ jobs:
         layer: [tcp, https, mcp]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.14'
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
@@ -146,12 +147,12 @@ jobs:
           name: distributions-${{ github.run_id }}-${{ github.run_attempt }}
           path: dist/
           digest-mismatch: error
-      - run: python -m pip install 'httpx2>=2.13.1,<3' 'cryptography>=50,<51'
+      - run: python -m pip install 'httpx2>=2.16,<3' 'cryptography>=50,<51'
       - if: matrix.layer != 'tcp'
-        name: Install checksum-pinned Caddy 2.11.7
+        name: Install checksum-pinned Caddy 2.11.9
         run: |
-          curl --fail --silent --show-error --location https://github.com/caddyserver/caddy/releases/download/v2.11.7/caddy_2.11.7_linux_amd64.tar.gz --output "$RUNNER_TEMP/caddy.tar.gz"
-          echo "727b91701a392de6ebc5027509f548bf39979e5216340d0faed8fa5e69c84f8b  $RUNNER_TEMP/caddy.tar.gz" | sha256sum --check
+          curl --fail --silent --show-error --location https://github.com/caddyserver/caddy/releases/download/v2.11.9/caddy_2.11.9_linux_amd64.tar.gz --output "$RUNNER_TEMP/caddy.tar.gz"
+          echo "5b8cb7faf8726a2028ad96a66e54e6e81e8f361bc6175e5d22bbd997cc5177fb  $RUNNER_TEMP/caddy.tar.gz" | sha256sum --check
           mkdir "$RUNNER_TEMP/caddy"
           tar -xzf "$RUNNER_TEMP/caddy.tar.gz" -C "$RUNNER_TEMP/caddy"
           echo "CADDY_BINARY=$RUNNER_TEMP/caddy/caddy" >> "$GITHUB_ENV"
